@@ -254,6 +254,15 @@ export class WebGLRenderer {
     // Centre de la vue dans le plan complexe, partie imaginaire.
     private centerY = 0.0;
 
+    // Indique si l'utilisateur est en train de faire un drag souris.
+    private isDragging = false;
+
+    // Dernière position X connue de la souris pendant le drag, en pixels écran.
+    private lastMouseX = 0;
+
+    // Dernière position Y connue de la souris pendant le drag, en pixels écran.
+    private lastMouseY = 0;
+
     // Taille verticale visible dans le plan complexe.
     // 3.0 donne une vue large au départ.
     private scale = 3.0;
@@ -363,38 +372,99 @@ export class WebGLRenderer {
 
 
     // Configure les contrôles utilisateur.
-    // Pour cette étape, on ajoute seulement le zoom à la molette.
+    // Pour l'instant : zoom molette + déplacement souris.
     private setupControls(): void {
-        // On écoute l'événement "wheel" sur le canvas.
-        // Il se déclenche quand l'utilisateur utilise la molette.
+        // Événement molette : zoom centré au milieu de l'écran.
         this.canvas.addEventListener("wheel", (event: WheelEvent) => {
-            // Empêche le navigateur de scroller la page.
-            // Même si overflow hidden est déjà dans le CSS, c'est plus propre.
+            // Empêche le scroll de la page.
             event.preventDefault();
 
             // Facteur de zoom.
-            // 0.9 signifie : on réduit la taille visible de 10%, donc on zoome.
             const zoomFactor = 0.9;
 
-            // event.deltaY indique le sens de la molette.
-            // deltaY < 0 : molette vers le haut, on zoome.
-            // deltaY > 0 : molette vers le bas, on dézoome.
+            // Molette vers le haut : zoom in.
             if (event.deltaY < 0) {
-                // Zoom in :
-                // scale plus petit = zone visible plus petite = image plus zoomée.
                 this.scale *= zoomFactor;
             } else {
-                // Zoom out :
-                // scale plus grand = zone visible plus grande = image moins zoomée.
+                // Molette vers le bas : zoom out.
                 this.scale /= zoomFactor;
             }
 
-            // Sécurité : on évite un scale trop petit pour l'instant.
-            // WebGL float32 perdra vite en précision de toute façon.
+            // Limite inférieure provisoire.
             this.scale = Math.max(this.scale, 1e-8);
 
-            // Sécurité : on évite aussi un scale absurdement grand.
+            // Limite supérieure provisoire.
             this.scale = Math.min(this.scale, 100.0);
+        });
+
+        // Événement mousedown : l'utilisateur commence à déplacer la vue.
+        this.canvas.addEventListener("mousedown", (event: MouseEvent) => {
+            // On ne réagit qu'au clic gauche.
+            // button === 0 signifie bouton gauche.
+            if (event.button !== 0) {
+                return;
+            }
+
+            // On active le mode drag.
+            this.isDragging = true;
+
+            // On mémorise la position initiale de la souris.
+            this.lastMouseX = event.clientX;
+            this.lastMouseY = event.clientY;
+        });
+
+        // Événement mousemove : la souris bouge.
+        window.addEventListener("mousemove", (event: MouseEvent) => {
+            // Si on n'est pas en train de drag, on ne fait rien.
+            if (!this.isDragging) {
+                return;
+            }
+
+            // Déplacement horizontal de la souris en pixels.
+            const deltaX = event.clientX - this.lastMouseX;
+
+            // Déplacement vertical de la souris en pixels.
+            const deltaY = event.clientY - this.lastMouseY;
+
+            // On met à jour la dernière position connue.
+            this.lastMouseX = event.clientX;
+            this.lastMouseY = event.clientY;
+
+            // Taille du canvas en pixels CSS, pas en pixels GPU.
+            const width = this.canvas.clientWidth;
+            const height = this.canvas.clientHeight;
+
+            // Ratio largeur / hauteur.
+            // On l'utilise parce que dans le shader on corrige aussi l'aspect ratio.
+            const aspect = width / height;
+
+            // Conversion pixels écran -> unités du plan complexe.
+            // Verticalement, la hauteur visible vaut this.scale.
+            const complexDeltaY = (deltaY / height) * this.scale;
+
+            // Horizontalement, la largeur visible vaut this.scale * aspect.
+            const complexDeltaX = (deltaX / width) * this.scale * aspect;
+
+            // Quand on tire l'image vers la droite, on veut voir la zone de gauche.
+            // Donc le centre se déplace dans le sens opposé du mouvement souris.
+            this.centerX -= complexDeltaX;
+
+            // Attention : dans l'écran, Y augmente vers le bas.
+            // Dans le plan complexe, Y augmente vers le haut.
+            // Donc le signe est inversé.
+            this.centerY += complexDeltaY;
+        });
+
+        // Événement mouseup : l'utilisateur relâche le clic.
+        window.addEventListener("mouseup", () => {
+            // On désactive le mode drag.
+            this.isDragging = false;
+        });
+
+        // Si la souris quitte la fenêtre, on arrête aussi le drag.
+        window.addEventListener("blur", () => {
+            // Évite de rester bloqué en mode drag si la fenêtre perd le focus.
+            this.isDragging = false;
         });
     }
     // Fonction appelée à chaque frame par main.ts.
