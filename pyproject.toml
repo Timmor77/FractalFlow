@@ -1,0 +1,10 @@
+[project]
+name = "fractal-flow-tools"
+version = "0.1.0"
+description = "Reference rendering and benchmark tools for FractalFlow"
+requires-python = ">=3.12"
+dependencies = []
+
+[dependency-groups]
+dev = []
+

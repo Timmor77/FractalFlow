@@ -1,0 +1,39 @@
+/* On force la page entière à prendre toute la fenêtre. */
+html,
+body {
+  /* Supprime les marges par défaut du navigateur. */
+  margin: 0;
+
+  /* La page prend toute la largeur disponible. */
+  width: 100%;
+
+  /* La page prend toute la hauteur disponible. */
+  height: 100%;
+
+  /* Empêche le scroll. Le viewer doit être plein écran. */
+  overflow: hidden;
+
+  /* Fond noir propre derrière le canvas. */
+  background: black;
+}
+
+/* #app est le conteneur principal créé par Vite dans index.html. */
+#app {
+  /* Il prend toute la largeur de la fenêtre. */
+  width: 100vw;
+
+  /* Il prend toute la hauteur de la fenêtre. */
+  height: 100vh;
+}
+
+/* Canvas où WebGL dessine la fractale. */
+#fractal-canvas {
+  /* Évite les petits espaces HTML autour du canvas. */
+  display: block;
+
+  /* Le canvas occupe toute la largeur visible. */
+  width: 100vw;
+
+  /* Le canvas occupe toute la hauteur visible. */
+  height: 100vh;
+}
