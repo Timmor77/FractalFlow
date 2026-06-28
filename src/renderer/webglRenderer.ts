@@ -1,216 +1,316 @@
-/**
- * Owns the WebGL2 context, GPU resources, uniforms, resize, and draw calls.
- * Fractal formulas belong in GLSL; input handling does not belong here.
- */
-
 // Ce fichier contient toute la logique WebGL2.
-// Le but est d'éviter de mettre le code GPU directement dans main.ts.
+// main.ts doit seulement créer le canvas et appeler WebGLRenderer.render().
 
-// Le vertex shader est un petit programme qui tourne sur le GPU.
-// Ici, il sert seulement à afficher deux triangles qui couvrent tout l'écran.
+// Vertex shader : programme GPU exécuté pour chaque sommet.
+// Ici il sert uniquement à dessiner un rectangle plein écran avec 2 triangles.
 const vertexShaderSource = `#version 300 es
 
-// On demande une précision correcte pour les floats dans le shader.
+// Précision des nombres flottants dans le shader.
 precision highp float;
 
-// Attribut reçu depuis le buffer TypeScript.
-// Chaque sommet aura une position 2D : x, y.
+// Position 2D de chaque sommet envoyée depuis TypeScript.
 in vec2 a_position;
 
 void main() {
-  // gl_Position est la position finale du sommet à l'écran.
-  // WebGL attend un vec4 : x, y, z, w.
-  // z = 0.0 car on fait de la 2D.
-  // w = 1.0 valeur standard pour les coordonnées homogènes.
+  // Position finale du sommet dans l'espace écran WebGL.
+  // x et y vont de -1 à 1.
+  // z = 0 car on fait de la 2D.
+  // w = 1 valeur standard pour les coordonnées homogènes.
   gl_Position = vec4(a_position, 0.0, 1.0);
 }
 `;
 
-// Le fragment shader tourne pour chaque pixel couvert par les triangles.
-// Ici, il va juste afficher un dégradé selon la position du pixel.
+// Fragment shader : programme GPU exécuté pour chaque pixel.
+// C'est ici que l'ensemble de Julia est calculé.
 const fragmentShaderSource = `#version 300 es
 
-// On demande une précision correcte pour les floats.
+// Précision des nombres flottants.
+// En WebGL, même highp reste généralement proche du float32 GPU.
 precision highp float;
 
-// Uniform envoyé depuis TypeScript.
-// Il contient la résolution réelle du canvas en pixels.
+// Résolution réelle du canvas en pixels.
 uniform vec2 u_resolution;
 
+// Centre de la caméra dans le plan complexe.
+uniform vec2 u_center;
+
+// Taille verticale visible dans le plan complexe.
+// Plus cette valeur est petite, plus on zoome.
+uniform float u_scale;
+
+// Paramètre complexe c de l'ensemble de Julia.
+// Formule : z = z² + c.
+uniform vec2 u_c;
+
+// Nombre maximum d'itérations.
+uniform int u_maxIter;
+
 // Couleur finale du pixel.
-// En WebGL2, on doit déclarer explicitement la sortie.
 out vec4 outColor;
 
+// Palette de couleur simple.
+// t est une valeur entre 0 et 1.
+vec3 palette(float t) {
+  // cos donne une transition douce entre les couleurs.
+  return 0.5 + 0.5 * cos(6.28318 * (vec3(0.00, 0.33, 0.67) + t));
+}
+
 void main() {
-  // gl_FragCoord.xy contient la position du pixel courant.
-  // Exemple : pixel en bas à gauche ≈ (0, 0).
-  // Pixel en haut à droite ≈ (width, height).
+  // Position du pixel courant en pixels.
   vec2 pixel = gl_FragCoord.xy;
 
-  // On normalise la position du pixel entre 0 et 1.
+  // Coordonnées normalisées :
   // uv.x = 0 à gauche, 1 à droite.
   // uv.y = 0 en bas, 1 en haut.
   vec2 uv = pixel / u_resolution;
 
-  // On crée une couleur simple :
-  // rouge dépend de x,
-  // vert dépend de y,
-  // bleu reste constant.
-  vec3 color = vec3(uv.x, uv.y, 0.5);
+  // On recentre autour de 0.
+  // p est environ entre -0.5 et 0.5.
+  vec2 p = uv - 0.5;
 
-  // On écrit la couleur finale du pixel.
-  // Le dernier nombre est l'opacité alpha : 1.0 = opaque.
+  // Correction du ratio largeur/hauteur.
+  // Sans ça, la fractale serait déformée sur un écran non carré.
+  p.x *= u_resolution.x / u_resolution.y;
+
+  // Conversion écran -> plan complexe.
+  // z est le point de départ du pixel dans le plan complexe.
+  vec2 z = u_center + p * u_scale;
+
+  // Nombre d'itérations avant divergence.
+  int iter = 0;
+
+  // Boucle d'itération.
+  // La limite 2000 doit être constante pour rester compatible WebGL.
+  for (int i = 0; i < 2000; i++) {
+    // Si on atteint le nombre d'itérations demandé, on arrête.
+    if (i >= u_maxIter) {
+      iter = u_maxIter;
+      break;
+    }
+
+    // Calcul de z² + c.
+    // Si z = x + iy :
+    // z² = (x² - y²) + i(2xy)
+    float x = z.x * z.x - z.y * z.y + u_c.x;
+    float y = 2.0 * z.x * z.y + u_c.y;
+
+    // Mise à jour de z.
+    z = vec2(x, y);
+
+    // Test de divergence.
+    // dot(z, z) = |z|².
+    // Si |z|² > 4, alors |z| > 2, donc le point diverge.
+    if (dot(z, z) > 4.0) {
+      iter = i;
+      break;
+    }
+  }
+
+  // Si le point ne diverge pas avant u_maxIter,
+  // on le considère comme appartenant à l'ensemble et on le met en noir.
+  if (iter == u_maxIter) {
+    outColor = vec4(0.0, 0.0, 0.0, 1.0);
+    return;
+  }
+
+  // Normalisation du nombre d'itérations entre 0 et 1.
+  float t = float(iter) / float(u_maxIter);
+
+  // Calcul de la couleur.
+  vec3 color = palette(t);
+
+  // Couleur finale du pixel.
   outColor = vec4(color, 1.0);
 }
 `;
 
-// Cette fonction compile un shader GLSL.
-// Un shader est du code texte que WebGL doit compiler pour le GPU.
+// Compile un shader GLSL.
+// type vaut gl.VERTEX_SHADER ou gl.FRAGMENT_SHADER.
 function createShader(
   gl: WebGL2RenderingContext,
   type: number,
   source: string,
 ): WebGLShader {
-  // On crée un objet shader vide côté WebGL.
+  // Crée un objet shader vide.
   const shader = gl.createShader(type);
 
-  // Si la création échoue, on arrête avec une erreur claire.
+  // Vérifie que la création a réussi.
   if (!shader) {
     throw new Error("Failed to create shader");
   }
 
-  // On donne le code source GLSL au shader.
+  // Envoie le code GLSL au shader.
   gl.shaderSource(shader, source);
 
-  // On demande à WebGL de compiler le shader.
+  // Compile le shader pour le GPU.
   gl.compileShader(shader);
 
-  // On vérifie si la compilation a réussi.
+  // Vérifie si la compilation a réussi.
   const success = gl.getShaderParameter(shader, gl.COMPILE_STATUS);
 
-  // Si la compilation échoue, on récupère le message d'erreur GLSL.
+  // Si compilation échouée, on récupère le message d'erreur.
   if (!success) {
     const log = gl.getShaderInfoLog(shader);
-
-    // On supprime le shader raté pour éviter de garder des ressources inutiles.
     gl.deleteShader(shader);
-
-    // On affiche l'erreur.
     throw new Error(`Shader compilation failed:\n${log}`);
   }
 
-  // Si tout va bien, on renvoie le shader compilé.
+  // Renvoie le shader compilé.
   return shader;
 }
 
-// Cette fonction crée un programme WebGL complet.
-// Un programme WebGL = vertex shader + fragment shader liés ensemble.
+// Crée un programme WebGL complet.
+// Un programme = vertex shader + fragment shader liés ensemble.
 function createProgram(gl: WebGL2RenderingContext): WebGLProgram {
-  // On compile le vertex shader.
+  // Compile le vertex shader.
   const vertexShader = createShader(gl, gl.VERTEX_SHADER, vertexShaderSource);
 
-  // On compile le fragment shader.
+  // Compile le fragment shader.
   const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fragmentShaderSource);
 
-  // On crée un programme WebGL vide.
+  // Crée un programme WebGL vide.
   const program = gl.createProgram();
 
-  // Si la création échoue, on arrête.
+  // Vérifie que la création a réussi.
   if (!program) {
     throw new Error("Failed to create WebGL program");
   }
 
-  // On attache le vertex shader au programme.
+  // Attache le vertex shader au programme.
   gl.attachShader(program, vertexShader);
 
-  // On attache le fragment shader au programme.
+  // Attache le fragment shader au programme.
   gl.attachShader(program, fragmentShader);
 
-  // On lie les deux shaders ensemble.
+  // Lie les deux shaders ensemble.
   gl.linkProgram(program);
 
-  // On vérifie que le linking a réussi.
+  // Vérifie que le linking a réussi.
   const success = gl.getProgramParameter(program, gl.LINK_STATUS);
 
-  // Si le linking échoue, on affiche l'erreur.
+  // Si le linking échoue, on récupère le message d'erreur.
   if (!success) {
     const log = gl.getProgramInfoLog(program);
-
-    // On supprime le programme raté.
     gl.deleteProgram(program);
-
-    // On arrête avec une erreur claire.
     throw new Error(`Program linking failed:\n${log}`);
   }
 
-  // Une fois le programme créé, les shaders individuels ne sont plus nécessaires.
+  // Une fois le programme lié, on peut supprimer les shaders individuels.
   gl.deleteShader(vertexShader);
-
-  // Même chose pour le fragment shader.
   gl.deleteShader(fragmentShader);
 
-  // On renvoie le programme WebGL prêt à être utilisé.
+  // Renvoie le programme prêt à être utilisé.
   return program;
 }
 
-// Classe principale qui gère le rendu WebGL2.
+// Récupère un uniform WebGL et vérifie qu'il existe.
+function getUniformLocation(
+  gl: WebGL2RenderingContext,
+  program: WebGLProgram,
+  name: string,
+): WebGLUniformLocation {
+  // Demande à WebGL l'emplacement du uniform dans le programme.
+  const location = gl.getUniformLocation(program, name);
+
+  // Si le uniform n'existe pas, il y a soit une erreur de nom,
+  // soit le shader ne l'utilise pas vraiment.
+  if (!location) {
+    throw new Error(`Uniform not found: ${name}`);
+  }
+
+  // Renvoie l'emplacement utilisable avec gl.uniform...
+  return location;
+}
+
+// Classe principale du renderer WebGL2.
 export class WebGLRenderer {
   // Canvas HTML où on dessine.
   private readonly canvas: HTMLCanvasElement;
 
-  // Contexte WebGL2 utilisé pour parler au GPU.
+  // Contexte WebGL2, c'est l'objet principal pour parler au GPU.
   private readonly gl: WebGL2RenderingContext;
 
   // Programme GPU : vertex shader + fragment shader.
   private readonly program: WebGLProgram;
 
-  // Emplacement du uniform u_resolution dans le shader.
+  // Emplacement du uniform u_resolution.
   private readonly resolutionLocation: WebGLUniformLocation;
 
-  // Le constructeur prépare tout ce qui est nécessaire au rendu.
+  // Emplacement du uniform u_center.
+  private readonly centerLocation: WebGLUniformLocation;
+
+  // Emplacement du uniform u_scale.
+  private readonly scaleLocation: WebGLUniformLocation;
+
+  // Emplacement du uniform u_c.
+  private readonly cLocation: WebGLUniformLocation;
+
+  // Emplacement du uniform u_maxIter.
+  private readonly maxIterLocation: WebGLUniformLocation;
+
+  // Centre de la vue dans le plan complexe, partie réelle.
+  private centerX = 0.0;
+
+  // Centre de la vue dans le plan complexe, partie imaginaire.
+  private centerY = 0.0;
+
+  // Taille verticale visible dans le plan complexe.
+  // 3.0 donne une vue large au départ.
+  private scale = 3.0;
+
+  // Partie réelle du paramètre c de Julia.
+  private cRe = -0.8;
+
+  // Partie imaginaire du paramètre c de Julia.
+  private cIm = 0.156;
+
+  // Nombre maximum d'itérations.
+  private maxIter = 500;
+
+  // Constructeur : prépare WebGL, les shaders et les buffers.
   constructor(canvas: HTMLCanvasElement) {
-    // On garde une référence au canvas.
+    // Garde une référence au canvas.
     this.canvas = canvas;
 
-    // On demande le contexte WebGL2 au navigateur.
+    // Demande un contexte WebGL2 au navigateur.
     const gl = canvas.getContext("webgl2");
 
-    // Si WebGL2 n'est pas supporté, on arrête.
+    // Si WebGL2 n'est pas disponible, on arrête.
     if (!gl) {
       throw new Error("WebGL2 is not supported by this browser or device");
     }
 
-    // On garde le contexte WebGL2 dans la classe.
+    // Sauvegarde le contexte WebGL2.
     this.gl = gl;
 
-    // On crée le programme GPU.
+    // Crée le programme GPU.
     this.program = createProgram(gl);
 
-    // On récupère la position de l'attribut a_position dans le vertex shader.
+    // Récupère l'emplacement de l'attribut a_position dans le vertex shader.
     const positionLocation = gl.getAttribLocation(this.program, "a_position");
 
-    // Si l'attribut n'existe pas, il y a un problème dans le shader.
+    // Si -1, l'attribut n'existe pas ou n'est pas utilisé.
     if (positionLocation === -1) {
       throw new Error("Attribute not found: a_position");
     }
 
-    // On crée un buffer GPU.
-    // Il va contenir les positions des sommets.
+    // Crée un buffer GPU pour les positions des sommets.
     const positionBuffer = gl.createBuffer();
 
-    // Si la création échoue, on arrête.
+    // Vérifie que le buffer a été créé.
     if (!positionBuffer) {
       throw new Error("Failed to create position buffer");
     }
 
-    // On dit à WebGL que ce buffer devient le buffer actif de type ARRAY_BUFFER.
+    // Définit ce buffer comme buffer actif de type ARRAY_BUFFER.
     gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
 
-    // Ces 6 points forment 2 triangles.
-    // Les deux triangles couvrent tout l'écran.
+    // Positions de 6 sommets formant 2 triangles plein écran.
     // Coordonnées WebGL :
-    // x = -1 gauche, x = 1 droite
-    // y = -1 bas,    y = 1 haut
+    // -1,-1 = bas gauche
+    //  1,-1 = bas droite
+    // -1, 1 = haut gauche
+    //  1, 1 = haut droite
     const positions = new Float32Array([
       -1, -1,
        1, -1,
@@ -221,67 +321,77 @@ export class WebGLRenderer {
        1,  1,
     ]);
 
-    // On envoie les positions dans le buffer GPU.
-    // STATIC_DRAW signifie que les données ne changeront presque jamais.
+    // Envoie les positions dans le buffer GPU.
+    // STATIC_DRAW signifie que ces données ne changeront presque jamais.
     gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
 
-    // Un VAO mémorise comment lire les buffers.
+    // Crée un VAO.
     // VAO = Vertex Array Object.
+    // Il mémorise comment lire les buffers de sommets.
     const vao = gl.createVertexArray();
 
-    // Si la création échoue, on arrête.
+    // Vérifie que le VAO a été créé.
     if (!vao) {
       throw new Error("Failed to create vertex array object");
     }
 
-    // On active ce VAO.
+    // Active le VAO.
     gl.bindVertexArray(vao);
 
-    // On active l'attribut a_position.
+    // Active l'attribut a_position.
     gl.enableVertexAttribArray(positionLocation);
 
-    // On explique à WebGL comment lire le buffer :
-    // - chaque sommet contient 2 floats
-    // - type = FLOAT
+    // Explique à WebGL comment lire le buffer :
+    // - chaque sommet contient 2 nombres
+    // - chaque nombre est un float
     // - pas de normalisation
-    // - stride = 0 : données compactes
-    // - offset = 0 : on commence au début du buffer
+    // - stride 0 : données compactes
+    // - offset 0 : commencer au début du buffer
     gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
 
-    // On récupère l'emplacement du uniform u_resolution.
-    const resolutionLocation = gl.getUniformLocation(this.program, "u_resolution");
-
-    // Si le uniform n'existe pas, on arrête.
-    if (!resolutionLocation) {
-      throw new Error("Uniform not found: u_resolution");
-    }
-
-    // On garde l'emplacement pour pouvoir l'envoyer à chaque frame.
-    this.resolutionLocation = resolutionLocation;
+    // Récupère tous les uniforms nécessaires au shader.
+    this.resolutionLocation = getUniformLocation(gl, this.program, "u_resolution");
+    this.centerLocation = getUniformLocation(gl, this.program, "u_center");
+    this.scaleLocation = getUniformLocation(gl, this.program, "u_scale");
+    this.cLocation = getUniformLocation(gl, this.program, "u_c");
+    this.maxIterLocation = getUniformLocation(gl, this.program, "u_maxIter");
   }
 
   // Fonction appelée à chaque frame par main.ts.
   render(): void {
-    // On vérifie que le canvas a la bonne taille.
+    // Ajuste la taille réelle du canvas si nécessaire.
     this.resizeCanvasIfNeeded();
 
-    // On récupère le contexte WebGL2.
+    // Raccourci local vers le contexte WebGL2.
     const gl = this.gl;
 
-    // On dit à WebGL d'utiliser notre programme GPU.
+    // Dit à WebGL d'utiliser notre programme GPU.
     gl.useProgram(this.program);
 
-    // On envoie la résolution réelle du canvas au shader.
+    // Envoie la résolution réelle du canvas au shader.
     gl.uniform2f(this.resolutionLocation, this.canvas.width, this.canvas.height);
 
-    // On dessine 6 sommets.
-    // Ces 6 sommets forment 2 triangles plein écran.
+    // Envoie le centre de la caméra au shader.
+    gl.uniform2f(this.centerLocation, this.centerX, this.centerY);
+
+    // Envoie le niveau de zoom au shader.
+    gl.uniform1f(this.scaleLocation, this.scale);
+
+    // Envoie le paramètre complexe c au shader.
+    gl.uniform2f(this.cLocation, this.cRe, this.cIm);
+
+    // Envoie le nombre maximum d'itérations au shader.
+    gl.uniform1i(this.maxIterLocation, this.maxIter);
+
+    // Dessine les 6 sommets.
+    // Ces 6 sommets forment deux triangles plein écran.
+    // Le fragment shader sera exécuté pour chaque pixel couvert.
     gl.drawArrays(gl.TRIANGLES, 0, 6);
   }
 
-  // Ajuste la résolution interne du canvas si nécessaire.
+  // Ajuste la résolution interne du canvas.
   private resizeCanvasIfNeeded(): void {
-    // devicePixelRatio prend en compte les écrans haute densité.
+    // Prend en compte les écrans haute densité.
     const pixelRatio = window.devicePixelRatio || 1;
 
     // Largeur réelle nécessaire en pixels.
@@ -290,18 +400,18 @@ export class WebGLRenderer {
     // Hauteur réelle nécessaire en pixels.
     const height = Math.floor(this.canvas.clientHeight * pixelRatio);
 
-    // Si la taille est déjà correcte, on ne fait rien.
+    // Si la taille est déjà correcte, on ne change rien.
     if (this.canvas.width === width && this.canvas.height === height) {
       return;
     }
 
-    // On met à jour la largeur interne du canvas.
+    // Met à jour la largeur interne du canvas.
     this.canvas.width = width;
 
-    // On met à jour la hauteur interne du canvas.
+    // Met à jour la hauteur interne du canvas.
     this.canvas.height = height;
 
-    // On dit à WebGL que le rendu doit couvrir tout le canvas.
+    // Dit à WebGL d'utiliser toute la surface du canvas.
     this.gl.viewport(0, 0, this.canvas.width, this.canvas.height);
   }
 }
