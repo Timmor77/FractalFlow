@@ -227,6 +227,10 @@ export class WebGLRenderer {
     // Canvas HTML où on dessine.
     private readonly canvas: HTMLCanvasElement;
 
+    // Identifiant de la frame demandée avec requestAnimationFrame.
+    // null signifie qu'aucun rendu n'est actuellement programmé.
+    private animationFrameId: number | null = null;
+
     // Contexte WebGL2, c'est l'objet principal pour parler au GPU.
     private readonly gl: WebGL2RenderingContext;
 
@@ -368,6 +372,11 @@ export class WebGLRenderer {
         // On connecte les événements souris au canvas.
         // Pour l'instant, on ne gère que le zoom avec la molette.
         this.setupControls();
+
+        // Si la fenêtre change de taille, il faut redessiner avec la nouvelle résolution.
+        window.addEventListener("resize", () => {
+            this.requestRender();
+        });
     }
 
 
@@ -395,6 +404,9 @@ export class WebGLRenderer {
 
             // Limite supérieure provisoire.
             this.scale = Math.min(this.scale, 100.0);
+
+            // Le zoom a changé, donc l'image doit être recalculée.
+            this.requestRender();
         });
 
         // Événement mousedown : l'utilisateur commence à déplacer la vue.
@@ -453,6 +465,9 @@ export class WebGLRenderer {
             // Dans le plan complexe, Y augmente vers le haut.
             // Donc le signe est inversé.
             this.centerY += complexDeltaY;
+
+            // Le centre de la vue a changé, donc l'image doit être recalculée.
+            this.requestRender();
         });
 
         // Événement mouseup : l'utilisateur relâche le clic.
@@ -467,8 +482,26 @@ export class WebGLRenderer {
             this.isDragging = false;
         });
     }
+
+    // Demande un rendu à la prochaine frame navigateur.
+    // Si un rendu est déjà prévu, on n'en programme pas un deuxième.
+    public requestRender(): void {
+        // Si une frame est déjà programmée, inutile d'en demander une autre.
+        if (this.animationFrameId !== null) {
+            return;
+        }
+
+        // On demande au navigateur d'appeler le rendu à la prochaine frame.
+        this.animationFrameId = requestAnimationFrame(() => {
+            // La frame programmée est maintenant consommée.
+            this.animationFrameId = null;
+
+            // On dessine l'image.
+            this.render();
+        });
+    }
     // Fonction appelée à chaque frame par main.ts.
-    render(): void {
+    private render(): void {
         // Ajuste la taille réelle du canvas si nécessaire.
         this.resizeCanvasIfNeeded();
 

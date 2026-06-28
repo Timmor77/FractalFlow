@@ -33,14 +33,6 @@ app.appendChild(canvas);
 // À ce moment-là, le renderer prépare le GPU, les shaders et les buffers.
 const renderer = new WebGLRenderer(canvas);
 
-// Cette fonction est appelée à chaque frame.
-function frame(): void {
-  // On demande au renderer de dessiner une image.
-  renderer.render();
-
-  // On demande au navigateur de rappeler frame() avant la prochaine image.
-  requestAnimationFrame(frame);
-}
-
-// On lance la première frame.
-frame();
+// On demande un premier rendu.
+// Ensuite, le renderer redessinera seulement quand quelque chose change.
+renderer.requestRender();
