@@ -1,604 +1,484 @@
-// Ce fichier contient toute la logique WebGL2.
-// main.ts doit seulement créer le canvas et appeler WebGLRenderer.render().
+// On importe la classe Viewport.
+// Elle gère les maths de caméra : centre, zoom, pan, conversion écran -> plan complexe.
+import { Viewport } from "../math/viewport";
 
 // Vertex shader : programme GPU exécuté pour chaque sommet.
-// Ici il sert uniquement à dessiner un rectangle plein écran avec 2 triangles.
+// Ici, il sert seulement à dessiner deux triangles qui couvrent tout l'écran.
 const vertexShaderSource = `#version 300 es
 
-// Précision des nombres flottants dans le shader.
 precision highp float;
 
-// Position 2D de chaque sommet envoyée depuis TypeScript.
 in vec2 a_position;
 
 void main() {
-  // Position finale du sommet dans l'espace écran WebGL.
-  // x et y vont de -1 à 1.
-  // z = 0 car on fait de la 2D.
-  // w = 1 valeur standard pour les coordonnées homogènes.
   gl_Position = vec4(a_position, 0.0, 1.0);
 }
 `;
 
 // Fragment shader : programme GPU exécuté pour chaque pixel.
-// C'est ici que l'ensemble de Julia est calculé.
+// C'est ici qu'on calcule l'ensemble de Julia.
 const fragmentShaderSource = `#version 300 es
 
-// Précision des nombres flottants.
-// En WebGL, même highp reste généralement proche du float32 GPU.
 precision highp float;
 
-// Résolution réelle du canvas en pixels.
 uniform vec2 u_resolution;
-
-// Centre de la caméra dans le plan complexe.
 uniform vec2 u_center;
-
-// Taille verticale visible dans le plan complexe.
-// Plus cette valeur est petite, plus on zoome.
 uniform float u_scale;
-
-// Paramètre complexe c de l'ensemble de Julia.
-// Formule : z = z² + c.
 uniform vec2 u_c;
-
-// Nombre maximum d'itérations.
 uniform int u_maxIter;
 
-// Couleur finale du pixel.
 out vec4 outColor;
 
-// Palette de couleur simple.
-// t est une valeur entre 0 et 1.
 vec3 palette(float t) {
-  // cos donne une transition douce entre les couleurs.
   return 0.5 + 0.5 * cos(6.28318 * (vec3(0.00, 0.33, 0.67) + t));
 }
 
 void main() {
-  // Position du pixel courant en pixels.
   vec2 pixel = gl_FragCoord.xy;
 
-  // Coordonnées normalisées :
-  // uv.x = 0 à gauche, 1 à droite.
-  // uv.y = 0 en bas, 1 en haut.
   vec2 uv = pixel / u_resolution;
 
-  // On recentre autour de 0.
-  // p est environ entre -0.5 et 0.5.
   vec2 p = uv - 0.5;
 
-  // Correction du ratio largeur/hauteur.
-  // Sans ça, la fractale serait déformée sur un écran non carré.
   p.x *= u_resolution.x / u_resolution.y;
 
-  // Conversion écran -> plan complexe.
-  // z est le point de départ du pixel dans le plan complexe.
   vec2 z = u_center + p * u_scale;
 
-  // Nombre d'itérations avant divergence.
   int iter = 0;
 
-  // Boucle d'itération.
-  // La limite 2000 doit être constante pour rester compatible WebGL.
   for (int i = 0; i < 2000; i++) {
-    // Si on atteint le nombre d'itérations demandé, on arrête.
     if (i >= u_maxIter) {
       iter = u_maxIter;
       break;
     }
 
-    // Calcul de z² + c.
-    // Si z = x + iy :
-    // z² = (x² - y²) + i(2xy)
     float x = z.x * z.x - z.y * z.y + u_c.x;
     float y = 2.0 * z.x * z.y + u_c.y;
 
-    // Mise à jour de z.
     z = vec2(x, y);
 
-    // Test de divergence.
-    // dot(z, z) = |z|².
-    // Si |z|² > 4, alors |z| > 2, donc le point diverge.
     if (dot(z, z) > 4.0) {
       iter = i;
       break;
     }
   }
 
-  // Si le point ne diverge pas avant u_maxIter,
-  // on le considère comme appartenant à l'ensemble et on le met en noir.
   if (iter == u_maxIter) {
     outColor = vec4(0.0, 0.0, 0.0, 1.0);
     return;
   }
 
-  // Normalisation du nombre d'itérations entre 0 et 1.
   float t = float(iter) / float(u_maxIter);
 
-  // Calcul de la couleur.
   vec3 color = palette(t);
 
-  // Couleur finale du pixel.
   outColor = vec4(color, 1.0);
 }
 `;
 
 // Compile un shader GLSL.
-// type vaut gl.VERTEX_SHADER ou gl.FRAGMENT_SHADER.
+// type vaut soit gl.VERTEX_SHADER, soit gl.FRAGMENT_SHADER.
 function createShader(
-    gl: WebGL2RenderingContext,
-    type: number,
-    source: string,
+  gl: WebGL2RenderingContext,
+  type: number,
+  source: string,
 ): WebGLShader {
-    // Crée un objet shader vide.
-    const shader = gl.createShader(type);
+  // Crée un objet shader WebGL.
+  const shader = gl.createShader(type);
 
-    // Vérifie que la création a réussi.
-    if (!shader) {
-        throw new Error("Failed to create shader");
-    }
+  // Si WebGL échoue à créer le shader, on arrête.
+  if (!shader) {
+    throw new Error("Failed to create shader");
+  }
 
-    // Envoie le code GLSL au shader.
-    gl.shaderSource(shader, source);
+  // Envoie le code GLSL au shader.
+  gl.shaderSource(shader, source);
 
-    // Compile le shader pour le GPU.
-    gl.compileShader(shader);
+  // Compile le shader.
+  gl.compileShader(shader);
 
-    // Vérifie si la compilation a réussi.
-    const success = gl.getShaderParameter(shader, gl.COMPILE_STATUS);
+  // Vérifie si la compilation a réussi.
+  const success = gl.getShaderParameter(shader, gl.COMPILE_STATUS);
 
-    // Si compilation échouée, on récupère le message d'erreur.
-    if (!success) {
-        const log = gl.getShaderInfoLog(shader);
-        gl.deleteShader(shader);
-        throw new Error(`Shader compilation failed:\n${log}`);
-    }
+  // Si la compilation échoue, on récupère le log d'erreur.
+  if (!success) {
+    const log = gl.getShaderInfoLog(shader);
 
-    // Renvoie le shader compilé.
-    return shader;
+    // Supprime le shader invalide.
+    gl.deleteShader(shader);
+
+    // Affiche une erreur claire.
+    throw new Error(`Shader compilation failed:\n${log}`);
+  }
+
+  // Renvoie le shader compilé.
+  return shader;
 }
 
 // Crée un programme WebGL complet.
 // Un programme = vertex shader + fragment shader liés ensemble.
 function createProgram(gl: WebGL2RenderingContext): WebGLProgram {
-    // Compile le vertex shader.
-    const vertexShader = createShader(gl, gl.VERTEX_SHADER, vertexShaderSource);
+  // Compile le vertex shader.
+  const vertexShader = createShader(gl, gl.VERTEX_SHADER, vertexShaderSource);
 
-    // Compile le fragment shader.
-    const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fragmentShaderSource);
+  // Compile le fragment shader.
+  const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fragmentShaderSource);
 
-    // Crée un programme WebGL vide.
-    const program = gl.createProgram();
+  // Crée un programme WebGL vide.
+  const program = gl.createProgram();
 
-    // Vérifie que la création a réussi.
-    if (!program) {
-        throw new Error("Failed to create WebGL program");
-    }
+  // Si la création échoue, on arrête.
+  if (!program) {
+    throw new Error("Failed to create WebGL program");
+  }
 
-    // Attache le vertex shader au programme.
-    gl.attachShader(program, vertexShader);
+  // Attache le vertex shader au programme.
+  gl.attachShader(program, vertexShader);
 
-    // Attache le fragment shader au programme.
-    gl.attachShader(program, fragmentShader);
+  // Attache le fragment shader au programme.
+  gl.attachShader(program, fragmentShader);
 
-    // Lie les deux shaders ensemble.
-    gl.linkProgram(program);
+  // Lie les shaders ensemble.
+  gl.linkProgram(program);
 
-    // Vérifie que le linking a réussi.
-    const success = gl.getProgramParameter(program, gl.LINK_STATUS);
+  // Vérifie si le linking a réussi.
+  const success = gl.getProgramParameter(program, gl.LINK_STATUS);
 
-    // Si le linking échoue, on récupère le message d'erreur.
-    if (!success) {
-        const log = gl.getProgramInfoLog(program);
-        gl.deleteProgram(program);
-        throw new Error(`Program linking failed:\n${log}`);
-    }
+  // Si le linking échoue, on récupère le log.
+  if (!success) {
+    const log = gl.getProgramInfoLog(program);
 
-    // Une fois le programme lié, on peut supprimer les shaders individuels.
-    gl.deleteShader(vertexShader);
-    gl.deleteShader(fragmentShader);
+    // Supprime le programme invalide.
+    gl.deleteProgram(program);
 
-    // Renvoie le programme prêt à être utilisé.
-    return program;
+    // Affiche une erreur claire.
+    throw new Error(`Program linking failed:\n${log}`);
+  }
+
+  // Une fois le programme créé, les shaders séparés ne sont plus nécessaires.
+  gl.deleteShader(vertexShader);
+  gl.deleteShader(fragmentShader);
+
+  // Renvoie le programme prêt à être utilisé.
+  return program;
 }
 
-// Récupère un uniform WebGL et vérifie qu'il existe.
+// Récupère l'emplacement d'un uniform dans le shader.
 function getUniformLocation(
-    gl: WebGL2RenderingContext,
-    program: WebGLProgram,
-    name: string,
+  gl: WebGL2RenderingContext,
+  program: WebGLProgram,
+  name: string,
 ): WebGLUniformLocation {
-    // Demande à WebGL l'emplacement du uniform dans le programme.
-    const location = gl.getUniformLocation(program, name);
+  // Demande à WebGL l'emplacement du uniform.
+  const location = gl.getUniformLocation(program, name);
 
-    // Si le uniform n'existe pas, il y a soit une erreur de nom,
-    // soit le shader ne l'utilise pas vraiment.
-    if (!location) {
-        throw new Error(`Uniform not found: ${name}`);
-    }
+  // Si location est null, le uniform est absent ou optimisé.
+  if (location === null) {
+    throw new Error(`Uniform not found: ${name}`);
+  }
 
-    // Renvoie l'emplacement utilisable avec gl.uniform...
-    return location;
+  // Renvoie l'emplacement utilisable avec gl.uniform...
+  return location;
 }
 
-// Classe principale du renderer WebGL2.
+// Renderer principal WebGL2.
 export class WebGLRenderer {
-    // Canvas HTML où on dessine.
-    private readonly canvas: HTMLCanvasElement;
+  // Canvas HTML où WebGL dessine.
+  private readonly canvas: HTMLCanvasElement;
 
-    // Identifiant de la frame demandée avec requestAnimationFrame.
-    // null signifie qu'aucun rendu n'est actuellement programmé.
-    private animationFrameId: number | null = null;
+  // Contexte WebGL2.
+  private readonly gl: WebGL2RenderingContext;
 
-    // Contexte WebGL2, c'est l'objet principal pour parler au GPU.
-    private readonly gl: WebGL2RenderingContext;
+  // Programme GPU : vertex shader + fragment shader.
+  private readonly program: WebGLProgram;
 
-    // Programme GPU : vertex shader + fragment shader.
-    private readonly program: WebGLProgram;
+  // VAO = Vertex Array Object.
+  // Il mémorise comment lire les sommets.
+  private readonly vao: WebGLVertexArrayObject;
 
-    // Emplacement du uniform u_resolution.
-    private readonly resolutionLocation: WebGLUniformLocation;
+  // Uniform : résolution réelle du canvas.
+  private readonly resolutionLocation: WebGLUniformLocation;
 
-    // Emplacement du uniform u_center.
-    private readonly centerLocation: WebGLUniformLocation;
+  // Uniform : centre de la caméra dans le plan complexe.
+  private readonly centerLocation: WebGLUniformLocation;
 
-    // Emplacement du uniform u_scale.
-    private readonly scaleLocation: WebGLUniformLocation;
+  // Uniform : niveau de zoom.
+  private readonly scaleLocation: WebGLUniformLocation;
 
-    // Emplacement du uniform u_c.
-    private readonly cLocation: WebGLUniformLocation;
+  // Uniform : paramètre c de Julia.
+  private readonly cLocation: WebGLUniformLocation;
 
-    // Emplacement du uniform u_maxIter.
-    private readonly maxIterLocation: WebGLUniformLocation;
+  // Uniform : nombre maximum d'itérations.
+  private readonly maxIterLocation: WebGLUniformLocation;
 
-    // Centre de la vue dans le plan complexe, partie réelle.
-    private centerX = 0.0;
+  // Viewport = caméra mathématique.
+  // Il contient centerX, centerY, scale, zoomAt(), panByPixels().
+  private readonly viewport = new Viewport();
 
-    // Centre de la vue dans le plan complexe, partie imaginaire.
-    private centerY = 0.0;
+  // Partie réelle du paramètre c de Julia.
+  private cRe = -0.8;
 
-    // Indique si l'utilisateur est en train de faire un drag souris.
-    private isDragging = false;
+  // Partie imaginaire du paramètre c de Julia.
+  private cIm = 0.156;
 
-    // Dernière position X connue de la souris pendant le drag, en pixels écran.
-    private lastMouseX = 0;
+  // Nombre maximum d'itérations.
+  private maxIter = 300;
 
-    // Dernière position Y connue de la souris pendant le drag, en pixels écran.
-    private lastMouseY = 0;
+  // Indique si l'utilisateur est en train de déplacer la vue.
+  private isDragging = false;
 
-    // Taille verticale visible dans le plan complexe.
-    // 3.0 donne une vue large au départ.
-    private scale = 3.0;
+  // Dernière position X connue de la souris pendant le drag.
+  private lastMouseX = 0;
 
-    // Partie réelle du paramètre c de Julia.
-    private cRe = -0.8;
+  // Dernière position Y connue de la souris pendant le drag.
+  private lastMouseY = 0;
 
-    // Partie imaginaire du paramètre c de Julia.
-    private cIm = 0.156;
+  // Identifiant de frame programmée avec requestAnimationFrame.
+  // null signifie qu'aucun rendu n'est prévu.
+  private animationFrameId: number | null = null;
 
-    // Nombre maximum d'itérations.
-    private maxIter = 500;
+  // Constructeur : initialise WebGL, les shaders, les buffers et les contrôles.
+  constructor(canvas: HTMLCanvasElement) {
+    // Garde une référence au canvas.
+    this.canvas = canvas;
 
-    // Constructeur : prépare WebGL, les shaders et les buffers.
-    constructor(canvas: HTMLCanvasElement) {
-        // Garde une référence au canvas.
-        this.canvas = canvas;
+    // Demande un contexte WebGL2 au navigateur.
+    const gl = canvas.getContext("webgl2");
 
-        // Demande un contexte WebGL2 au navigateur.
-        const gl = canvas.getContext("webgl2");
-
-        // Si WebGL2 n'est pas disponible, on arrête.
-        if (!gl) {
-            throw new Error("WebGL2 is not supported by this browser or device");
-        }
-
-        // Sauvegarde le contexte WebGL2.
-        this.gl = gl;
-
-        // Crée le programme GPU.
-        this.program = createProgram(gl);
-
-        // Récupère l'emplacement de l'attribut a_position dans le vertex shader.
-        const positionLocation = gl.getAttribLocation(this.program, "a_position");
-
-        // Si -1, l'attribut n'existe pas ou n'est pas utilisé.
-        if (positionLocation === -1) {
-            throw new Error("Attribute not found: a_position");
-        }
-
-        // Crée un buffer GPU pour les positions des sommets.
-        const positionBuffer = gl.createBuffer();
-
-        // Vérifie que le buffer a été créé.
-        if (!positionBuffer) {
-            throw new Error("Failed to create position buffer");
-        }
-
-        // Définit ce buffer comme buffer actif de type ARRAY_BUFFER.
-        gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
-
-        // Positions de 6 sommets formant 2 triangles plein écran.
-        // Coordonnées WebGL :
-        // -1,-1 = bas gauche
-        //  1,-1 = bas droite
-        // -1, 1 = haut gauche
-        //  1, 1 = haut droite
-        const positions = new Float32Array([
-            -1, -1,
-            1, -1,
-            -1, 1,
-
-            -1, 1,
-            1, -1,
-            1, 1,
-        ]);
-
-        // Envoie les positions dans le buffer GPU.
-        // STATIC_DRAW signifie que ces données ne changeront presque jamais.
-        gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
-
-        // Crée un VAO.
-        // VAO = Vertex Array Object.
-        // Il mémorise comment lire les buffers de sommets.
-        const vao = gl.createVertexArray();
-
-        // Vérifie que le VAO a été créé.
-        if (!vao) {
-            throw new Error("Failed to create vertex array object");
-        }
-
-        // Active le VAO.
-        gl.bindVertexArray(vao);
-
-        // Active l'attribut a_position.
-        gl.enableVertexAttribArray(positionLocation);
-
-        // Explique à WebGL comment lire le buffer :
-        // - chaque sommet contient 2 nombres
-        // - chaque nombre est un float
-        // - pas de normalisation
-        // - stride 0 : données compactes
-        // - offset 0 : commencer au début du buffer
-        gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
-
-        // Récupère tous les uniforms nécessaires au shader.
-        this.resolutionLocation = getUniformLocation(gl, this.program, "u_resolution");
-        this.centerLocation = getUniformLocation(gl, this.program, "u_center");
-        this.scaleLocation = getUniformLocation(gl, this.program, "u_scale");
-        this.cLocation = getUniformLocation(gl, this.program, "u_c");
-        this.maxIterLocation = getUniformLocation(gl, this.program, "u_maxIter");
-
-        // On connecte les événements souris au canvas.
-        // Pour l'instant, on ne gère que le zoom avec la molette.
-        this.setupControls();
-
-        // Si la fenêtre change de taille, il faut redessiner avec la nouvelle résolution.
-        window.addEventListener("resize", () => {
-            this.requestRender();
-        });
+    // Si WebGL2 n'est pas disponible, on arrête.
+    if (!gl) {
+      throw new Error("WebGL2 is not supported by this browser or device");
     }
 
+    // Sauvegarde le contexte WebGL2.
+    this.gl = gl;
 
-    // Convertit une position souris en coordonnées du plan complexe.
-    // mouseX et mouseY sont en pixels CSS, comme event.clientX / event.clientY.
-    private screenToComplex(mouseX: number, mouseY: number): { x: number; y: number } {
-        // Récupère la position et la taille du canvas dans la page.
-        const rect = this.canvas.getBoundingClientRect();
+    // Crée le programme GPU.
+    this.program = createProgram(gl);
 
-        // Position de la souris relative au canvas, entre 0 et width/height.
-        const localX = mouseX - rect.left;
-        const localY = mouseY - rect.top;
+    // Récupère l'emplacement de l'attribut a_position.
+    const positionLocation = gl.getAttribLocation(this.program, "a_position");
 
-        // Coordonnées normalisées entre 0 et 1.
-        const uvX = localX / rect.width;
-        const uvY = localY / rect.height;
-
-        // On recentre autour de 0.
-        // x : gauche -> -0.5, droite -> 0.5
-        const centeredX = uvX - 0.5;
-
-        // Attention : côté écran, y augmente vers le bas.
-        // Dans le shader, gl_FragCoord.y augmente vers le haut.
-        // Donc on inverse y ici pour avoir la même logique que le shader.
-        const centeredY = 0.5 - uvY;
-
-        // Ratio largeur / hauteur.
-        const aspect = rect.width / rect.height;
-
-        // Conversion vers le plan complexe.
-        // C'est la même formule que dans le shader :
-        // z = center + p * scale
-        return {
-            x: this.centerX + centeredX * aspect * this.scale,
-            y: this.centerY + centeredY * this.scale,
-        };
+    // Si -1, l'attribut n'existe pas ou n'est pas utilisé.
+    if (positionLocation === -1) {
+      throw new Error("Attribute not found: a_position");
     }
 
-    // Configure les contrôles utilisateur.
-    // Pour l'instant : zoom molette + déplacement souris.
-    private setupControls(): void {
-        // Événement molette : zoom autour de la position exacte du curseur.
-        this.canvas.addEventListener("wheel", (event: WheelEvent) => {
-            // Empêche le scroll de la page.
-            event.preventDefault();
+    // Crée un buffer GPU pour les sommets.
+    const positionBuffer = gl.createBuffer();
 
-            // Point complexe situé sous la souris avant le zoom.
-            const beforeZoom = this.screenToComplex(event.clientX, event.clientY);
-
-            // Facteur de zoom.
-            const zoomFactor = 0.9;
-
-            // Molette vers le haut : zoom in.
-            if (event.deltaY < 0) {
-                this.scale *= zoomFactor;
-            } else {
-                // Molette vers le bas : zoom out.
-                this.scale /= zoomFactor;
-            }
-
-            // Limites provisoires.
-            this.scale = Math.max(this.scale, 1e-8);
-            this.scale = Math.min(this.scale, 100.0);
-
-            // Point complexe sous la souris après changement du scale.
-            const afterZoom = this.screenToComplex(event.clientX, event.clientY);
-
-            // On corrige le centre pour que le point avant zoom
-            // reste exactement sous le curseur après zoom.
-            this.centerX += beforeZoom.x - afterZoom.x;
-            this.centerY += beforeZoom.y - afterZoom.y;
-
-            // La vue a changé, donc il faut redessiner.
-            this.requestRender();
-        });
-
-        // Événement mousedown : l'utilisateur commence à déplacer la vue.
-        this.canvas.addEventListener("mousedown", (event: MouseEvent) => {
-            // On ne réagit qu'au clic gauche.
-            // button === 0 signifie bouton gauche.
-            if (event.button !== 0) {
-                return;
-            }
-
-            // On active le mode drag.
-            this.isDragging = true;
-
-            // On mémorise la position initiale de la souris.
-            this.lastMouseX = event.clientX;
-            this.lastMouseY = event.clientY;
-        });
-
-        // Événement mousemove : la souris bouge.
-        window.addEventListener("mousemove", (event: MouseEvent) => {
-            // Si on n'est pas en train de drag, on ne fait rien.
-            if (!this.isDragging) {
-                return;
-            }
-
-            // Déplacement horizontal de la souris en pixels.
-            const deltaX = event.clientX - this.lastMouseX;
-
-            // Déplacement vertical de la souris en pixels.
-            const deltaY = event.clientY - this.lastMouseY;
-
-            // On met à jour la dernière position connue.
-            this.lastMouseX = event.clientX;
-            this.lastMouseY = event.clientY;
-
-            // Taille du canvas en pixels CSS, pas en pixels GPU.
-            const width = this.canvas.clientWidth;
-            const height = this.canvas.clientHeight;
-
-            // Ratio largeur / hauteur.
-            // On l'utilise parce que dans le shader on corrige aussi l'aspect ratio.
-            const aspect = width / height;
-
-            // Conversion pixels écran -> unités du plan complexe.
-            // Verticalement, la hauteur visible vaut this.scale.
-            const complexDeltaY = (deltaY / height) * this.scale;
-
-            // Horizontalement, la largeur visible vaut this.scale * aspect.
-            const complexDeltaX = (deltaX / width) * this.scale * aspect;
-
-            // Quand on tire l'image vers la droite, on veut voir la zone de gauche.
-            // Donc le centre se déplace dans le sens opposé du mouvement souris.
-            this.centerX -= complexDeltaX;
-
-            // Attention : dans l'écran, Y augmente vers le bas.
-            // Dans le plan complexe, Y augmente vers le haut.
-            // Donc le signe est inversé.
-            this.centerY += complexDeltaY;
-
-            // Le centre de la vue a changé, donc l'image doit être recalculée.
-            this.requestRender();
-        });
-
-        // Événement mouseup : l'utilisateur relâche le clic.
-        window.addEventListener("mouseup", () => {
-            // On désactive le mode drag.
-            this.isDragging = false;
-        });
-
-        // Si la souris quitte la fenêtre, on arrête aussi le drag.
-        window.addEventListener("blur", () => {
-            // Évite de rester bloqué en mode drag si la fenêtre perd le focus.
-            this.isDragging = false;
-        });
+    // Vérifie que le buffer a bien été créé.
+    if (!positionBuffer) {
+      throw new Error("Failed to create position buffer");
     }
 
-    // Demande un rendu à la prochaine frame navigateur.
-    // Si un rendu est déjà prévu, on n'en programme pas un deuxième.
-    public requestRender(): void {
-        // Si une frame est déjà programmée, inutile d'en demander une autre.
-        if (this.animationFrameId !== null) {
-            return;
-        }
+    // Active ce buffer comme ARRAY_BUFFER courant.
+    gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
 
-        // On demande au navigateur d'appeler le rendu à la prochaine frame.
-        this.animationFrameId = requestAnimationFrame(() => {
-            // La frame programmée est maintenant consommée.
-            this.animationFrameId = null;
+    // Positions de 6 sommets formant 2 triangles plein écran.
+    const positions = new Float32Array([
+      -1, -1,
+       1, -1,
+      -1,  1,
 
-            // On dessine l'image.
-            this.render();
-        });
-    }
-    // Fonction appelée à chaque frame par main.ts.
-    private render(): void {
-        // Ajuste la taille réelle du canvas si nécessaire.
-        this.resizeCanvasIfNeeded();
+      -1,  1,
+       1, -1,
+       1,  1,
+    ]);
 
-        // Raccourci local vers le contexte WebGL2.
-        const gl = this.gl;
+    // Envoie ces positions dans le buffer GPU.
+    gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
 
-        // Dit à WebGL d'utiliser notre programme GPU.
-        gl.useProgram(this.program);
+    // Crée un VAO pour mémoriser comment lire le buffer.
+    const vao = gl.createVertexArray();
 
-        // Envoie la résolution réelle du canvas au shader.
-        gl.uniform2f(this.resolutionLocation, this.canvas.width, this.canvas.height);
-
-        // Envoie le centre de la caméra au shader.
-        gl.uniform2f(this.centerLocation, this.centerX, this.centerY);
-
-        // Envoie le niveau de zoom au shader.
-        gl.uniform1f(this.scaleLocation, this.scale);
-
-        // Envoie le paramètre complexe c au shader.
-        gl.uniform2f(this.cLocation, this.cRe, this.cIm);
-
-        // Envoie le nombre maximum d'itérations au shader.
-        gl.uniform1i(this.maxIterLocation, this.maxIter);
-
-        // Dessine les 6 sommets.
-        // Ces 6 sommets forment deux triangles plein écran.
-        // Le fragment shader sera exécuté pour chaque pixel couvert.
-        gl.drawArrays(gl.TRIANGLES, 0, 6);
+    // Vérifie que le VAO a été créé.
+    if (!vao) {
+      throw new Error("Failed to create vertex array object");
     }
 
-    // Ajuste la résolution interne du canvas.
-    private resizeCanvasIfNeeded(): void {
-        // Prend en compte les écrans haute densité.
-        const pixelRatio = window.devicePixelRatio || 1;
+    // Sauvegarde le VAO dans la classe.
+    this.vao = vao;
 
-        // Largeur réelle nécessaire en pixels.
-        const width = Math.floor(this.canvas.clientWidth * pixelRatio);
+    // Active le VAO.
+    gl.bindVertexArray(this.vao);
 
-        // Hauteur réelle nécessaire en pixels.
-        const height = Math.floor(this.canvas.clientHeight * pixelRatio);
+    // Active l'attribut a_position.
+    gl.enableVertexAttribArray(positionLocation);
 
-        // Si la taille est déjà correcte, on ne change rien.
-        if (this.canvas.width === width && this.canvas.height === height) {
-            return;
-        }
+    // Explique à WebGL comment lire les données :
+    // 2 floats par sommet, données compactes, à partir du début du buffer.
+    gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
 
-        // Met à jour la largeur interne du canvas.
-        this.canvas.width = width;
+    // Récupère les uniforms utilisés par le fragment shader.
+    this.resolutionLocation = getUniformLocation(gl, this.program, "u_resolution");
+    this.centerLocation = getUniformLocation(gl, this.program, "u_center");
+    this.scaleLocation = getUniformLocation(gl, this.program, "u_scale");
+    this.cLocation = getUniformLocation(gl, this.program, "u_c");
+    this.maxIterLocation = getUniformLocation(gl, this.program, "u_maxIter");
 
-        // Met à jour la hauteur interne du canvas.
-        this.canvas.height = height;
+    // Configure les contrôles souris.
+    this.setupControls();
 
-        // Dit à WebGL d'utiliser toute la surface du canvas.
-        this.gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+    // Quand la fenêtre change de taille, il faut redessiner.
+    window.addEventListener("resize", () => {
+      this.requestRender();
+    });
+  }
+
+  // Demande un rendu à la prochaine frame navigateur.
+  // Si un rendu est déjà prévu, on n'en programme pas un autre.
+  public requestRender(): void {
+    // Si une frame est déjà programmée, on sort.
+    if (this.animationFrameId !== null) {
+      return;
     }
+
+    // Programme un rendu à la prochaine frame.
+    this.animationFrameId = requestAnimationFrame(() => {
+      // Marque la frame comme consommée.
+      this.animationFrameId = null;
+
+      // Dessine l'image.
+      this.render();
+    });
+  }
+
+  // Configure zoom et déplacement souris.
+  private setupControls(): void {
+    // Zoom avec la molette autour du curseur.
+    this.canvas.addEventListener("wheel", (event: WheelEvent) => {
+      // Empêche le scroll de la page.
+      event.preventDefault();
+
+      // Récupère le rectangle du canvas dans la page.
+      const rect = this.canvas.getBoundingClientRect();
+
+      // Délègue le zoom au viewport.
+      this.viewport.zoomAt(event.clientX, event.clientY, rect, event.deltaY);
+
+      // La vue a changé, donc il faut redessiner.
+      this.requestRender();
+    });
+
+    // Début du drag souris.
+    this.canvas.addEventListener("mousedown", (event: MouseEvent) => {
+      // On ne prend que le clic gauche.
+      if (event.button !== 0) {
+        return;
+      }
+
+      // Active le mode drag.
+      this.isDragging = true;
+
+      // Sauvegarde la position initiale.
+      this.lastMouseX = event.clientX;
+      this.lastMouseY = event.clientY;
+    });
+
+    // Mouvement souris pendant le drag.
+    window.addEventListener("mousemove", (event: MouseEvent) => {
+      // Si on ne drag pas, on ignore.
+      if (!this.isDragging) {
+        return;
+      }
+
+      // Déplacement horizontal en pixels.
+      const deltaX = event.clientX - this.lastMouseX;
+
+      // Déplacement vertical en pixels.
+      const deltaY = event.clientY - this.lastMouseY;
+
+      // Met à jour la dernière position souris.
+      this.lastMouseX = event.clientX;
+      this.lastMouseY = event.clientY;
+
+      // Largeur CSS du canvas.
+      const width = this.canvas.clientWidth;
+
+      // Hauteur CSS du canvas.
+      const height = this.canvas.clientHeight;
+
+      // Délègue le déplacement au viewport.
+      this.viewport.panByPixels(deltaX, deltaY, width, height);
+
+      // La vue a changé, donc il faut redessiner.
+      this.requestRender();
+    });
+
+    // Fin du drag souris.
+    window.addEventListener("mouseup", () => {
+      // Désactive le mode drag.
+      this.isDragging = false;
+    });
+
+    // Si la fenêtre perd le focus, on arrête aussi le drag.
+    window.addEventListener("blur", () => {
+      // Évite de rester bloqué en mode drag.
+      this.isDragging = false;
+    });
+  }
+
+  // Dessine réellement une frame.
+  private render(): void {
+    // Ajuste la résolution interne du canvas si nécessaire.
+    this.resizeCanvasIfNeeded();
+
+    // Raccourci local vers le contexte WebGL2.
+    const gl = this.gl;
+
+    // Utilise notre programme GPU.
+    gl.useProgram(this.program);
+
+    // Active le VAO qui contient le rectangle plein écran.
+    gl.bindVertexArray(this.vao);
+
+    // Envoie la résolution réelle au shader.
+    gl.uniform2f(this.resolutionLocation, this.canvas.width, this.canvas.height);
+
+    // Envoie le centre de la vue au shader.
+    gl.uniform2f(
+      this.centerLocation,
+      this.viewport.centerX,
+      this.viewport.centerY,
+    );
+
+    // Envoie le niveau de zoom au shader.
+    gl.uniform1f(this.scaleLocation, this.viewport.scale);
+
+    // Envoie le paramètre c de Julia au shader.
+    gl.uniform2f(this.cLocation, this.cRe, this.cIm);
+
+    // Envoie le nombre maximum d'itérations au shader.
+    gl.uniform1i(this.maxIterLocation, this.maxIter);
+
+    // Dessine 6 sommets = 2 triangles = rectangle plein écran.
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+  }
+
+  // Ajuste la résolution interne du canvas.
+  private resizeCanvasIfNeeded(): void {
+    // Prend en compte les écrans haute densité.
+    const pixelRatio = window.devicePixelRatio || 1;
+
+    // Largeur réelle en pixels.
+    const width = Math.floor(this.canvas.clientWidth * pixelRatio);
+
+    // Hauteur réelle en pixels.
+    const height = Math.floor(this.canvas.clientHeight * pixelRatio);
+
+    // Si la taille est déjà correcte, on ne fait rien.
+    if (this.canvas.width === width && this.canvas.height === height) {
+      return;
+    }
+
+    // Met à jour la largeur interne.
+    this.canvas.width = width;
+
+    // Met à jour la hauteur interne.
+    this.canvas.height = height;
+
+    // Dit à WebGL d'utiliser toute la surface du canvas.
+    this.gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+  }
 }
