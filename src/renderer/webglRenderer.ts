@@ -380,13 +380,51 @@ export class WebGLRenderer {
     }
 
 
+    // Convertit une position souris en coordonnées du plan complexe.
+    // mouseX et mouseY sont en pixels CSS, comme event.clientX / event.clientY.
+    private screenToComplex(mouseX: number, mouseY: number): { x: number; y: number } {
+        // Récupère la position et la taille du canvas dans la page.
+        const rect = this.canvas.getBoundingClientRect();
+
+        // Position de la souris relative au canvas, entre 0 et width/height.
+        const localX = mouseX - rect.left;
+        const localY = mouseY - rect.top;
+
+        // Coordonnées normalisées entre 0 et 1.
+        const uvX = localX / rect.width;
+        const uvY = localY / rect.height;
+
+        // On recentre autour de 0.
+        // x : gauche -> -0.5, droite -> 0.5
+        const centeredX = uvX - 0.5;
+
+        // Attention : côté écran, y augmente vers le bas.
+        // Dans le shader, gl_FragCoord.y augmente vers le haut.
+        // Donc on inverse y ici pour avoir la même logique que le shader.
+        const centeredY = 0.5 - uvY;
+
+        // Ratio largeur / hauteur.
+        const aspect = rect.width / rect.height;
+
+        // Conversion vers le plan complexe.
+        // C'est la même formule que dans le shader :
+        // z = center + p * scale
+        return {
+            x: this.centerX + centeredX * aspect * this.scale,
+            y: this.centerY + centeredY * this.scale,
+        };
+    }
+
     // Configure les contrôles utilisateur.
     // Pour l'instant : zoom molette + déplacement souris.
     private setupControls(): void {
-        // Événement molette : zoom centré au milieu de l'écran.
+        // Événement molette : zoom autour de la position exacte du curseur.
         this.canvas.addEventListener("wheel", (event: WheelEvent) => {
             // Empêche le scroll de la page.
             event.preventDefault();
+
+            // Point complexe situé sous la souris avant le zoom.
+            const beforeZoom = this.screenToComplex(event.clientX, event.clientY);
 
             // Facteur de zoom.
             const zoomFactor = 0.9;
@@ -399,13 +437,19 @@ export class WebGLRenderer {
                 this.scale /= zoomFactor;
             }
 
-            // Limite inférieure provisoire.
+            // Limites provisoires.
             this.scale = Math.max(this.scale, 1e-8);
-
-            // Limite supérieure provisoire.
             this.scale = Math.min(this.scale, 100.0);
 
-            // Le zoom a changé, donc l'image doit être recalculée.
+            // Point complexe sous la souris après changement du scale.
+            const afterZoom = this.screenToComplex(event.clientX, event.clientY);
+
+            // On corrige le centre pour que le point avant zoom
+            // reste exactement sous le curseur après zoom.
+            this.centerX += beforeZoom.x - afterZoom.x;
+            this.centerY += beforeZoom.y - afterZoom.y;
+
+            // La vue a changé, donc il faut redessiner.
             this.requestRender();
         });
 
