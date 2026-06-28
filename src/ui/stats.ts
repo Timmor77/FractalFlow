@@ -1,55 +1,54 @@
-/**
- * Step 7 overlay: FPS, frame time, resolution, and iteration count.
- * Avoid introducing a UI framework for this small read-only surface.
- */
-
 // Données affichées dans l'overlay de stats.
 export type StatsData = {
   // Nombre total de rendus effectués.
   renderCount: number;
 
   // Temps CPU approximatif du dernier rendu.
-  // Attention : WebGL est asynchrone, donc ce n'est pas le vrai temps GPU.
   lastRenderMs: number;
 
-  // Centre X de la caméra dans le plan complexe.
+  // Centre X de la caméra.
   centerX: number;
 
-  // Centre Y de la caméra dans le plan complexe.
+  // Centre Y de la caméra.
   centerY: number;
 
-  // Taille verticale visible dans le plan complexe.
+  // Taille verticale visible.
   scale: number;
 
-  // Nombre maximum d'itérations Julia.
+  // Niveau de zoom indicatif.
+  zoomLevel: number;
+
+  // Nombre d'itérations réellement envoyé au shader.
   maxIter: number;
 };
 
-// Petit overlay HTML affiché par-dessus le canvas.
+// Overlay HTML simple.
 export class StatsOverlay {
-  // Élément HTML principal de l'overlay.
+  // Élément HTML principal.
   private readonly element: HTMLDivElement;
 
   constructor() {
-    // On crée une div.
+    // Crée une div.
     this.element = document.createElement("div");
 
-    // On lui donne un id pour pouvoir la styliser en CSS.
+    // Id utilisé par le CSS.
     this.element.id = "stats-overlay";
 
-    // On l'ajoute à la page.
+    // Ajoute l'overlay à la page.
     document.body.appendChild(this.element);
   }
 
   // Met à jour le contenu affiché.
   public update(data: StatsData): void {
-    // innerHTML permet d'afficher plusieurs lignes facilement.
     this.element.innerHTML = `
       <div>renders: ${data.renderCount}</div>
       <div>last render: ${data.lastRenderMs.toFixed(3)} ms</div>
-      <div>center: ${data.centerX.toExponential(4)}, ${data.centerY.toExponential(4)}</div>
-      <div>scale: ${data.scale.toExponential(4)}</div>
+      <div>centerX: ${data.centerX.toExponential(6)}</div>
+      <div>centerY: ${data.centerY.toExponential(6)}</div>
+      <div>scale: ${data.scale.toExponential(6)}</div>
+      <div>zoom level: ${data.zoomLevel.toFixed(2)}</div>
       <div>maxIter: ${data.maxIter}</div>
+      <div>reset: R</div>
     `;
   }
 }

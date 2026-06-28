@@ -1,152 +1,155 @@
-/**
- * Defines screen-to-complex coordinate transforms, center, aspect ratio, and
- * scale. Keep this module independent from WebGL so it can be unit-tested.
- */
-
-// Ce type représente un point 2D.
-// On l'utilise pour les coordonnées complexes : x = partie réelle, y = partie imaginaire.
+// Point 2D générique.
+// Pour nous : x = partie réelle, y = partie imaginaire.
 export type Point2D = {
-    // Coordonnée horizontale.
-    x: number;
-
-    // Coordonnée verticale.
-    y: number;
+  x: number;
+  y: number;
 };
 
-// Cette classe représente la "caméra" dans le plan complexe.
-// Elle ne connaît rien à WebGL.
-// Elle gère seulement le centre, le zoom, et les conversions de coordonnées.
+// Représentation high/low d'un nombre JavaScript.
+// high est la partie représentable en float32.
+// low est le reste.
+export type SplitNumber = {
+  high: number;
+  low: number;
+};
+
+// Sépare un number JavaScript float64 en deux morceaux.
+// Math.fround convertit explicitement vers float32.
+// value = high + low, avec high envoyé proprement au GPU et low comme correction.
+export function splitNumber(value: number): SplitNumber {
+  const high = Math.fround(value);
+  const low = value - high;
+
+  return { high, low };
+}
+
+// Viewport = caméra mathématique dans le plan complexe.
+// Cette classe ne connaît rien à WebGL.
 export class Viewport {
-    // Centre de la vue dans le plan complexe, partie réelle.
-    public centerX = 0.0;
+  // Valeurs initiales utilisées par reset().
+  private readonly initialCenterX = 0.0;
+  private readonly initialCenterY = 0.0;
+  private readonly initialScale = 3.0;
 
-    // Centre de la vue dans le plan complexe, partie imaginaire.
-    public centerY = 0.0;
+  // Centre de la vue, partie réelle.
+  public centerX = this.initialCenterX;
 
-    // Taille verticale visible dans le plan complexe.
-    // Plus scale est petit, plus on zoome.
-    public scale = 3.0;
+  // Centre de la vue, partie imaginaire.
+  public centerY = this.initialCenterY;
 
-    // Scale minimum provisoire.
-    // En dessous, WebGL float32 perdra vite en précision.
-    private readonly minScale = 1e-8;
+  // Taille verticale visible dans le plan complexe.
+  // Plus scale est petit, plus on zoome.
+  public scale = this.initialScale;
 
-    // Scale maximum provisoire.
-    // Évite de dézoomer absurdement loin.
-    private readonly maxScale = 100.0;
+  // Limite minimale provisoire.
+  // Avec le double-single, on peut descendre plus bas que float32 simple,
+  // mais ce n'est toujours pas du vrai deep zoom infini.
+  private readonly minScale = 1e-14;
 
-    // Convertit une position souris en coordonnées du plan complexe.
-    public screenToComplex(
-        // Position X de la souris en pixels navigateur.
-        mouseX: number,
+  // Limite maximale pour éviter de dézoomer absurdement loin.
+  private readonly maxScale = 100.0;
 
-        // Position Y de la souris en pixels navigateur.
-        mouseY: number,
+  // Intensité du zoom.
+  // On utilise une formule exponentielle pour mieux gérer souris et trackpads.
+  private readonly wheelZoomStrength = 0.002;
 
-        // Rectangle du canvas dans la page.
-        rect: DOMRect,
-    ): Point2D {
-        // Position X locale dans le canvas.
-        const localX = mouseX - rect.left;
+  // Remet la caméra à l'état initial.
+  public reset(): void {
+    this.centerX = this.initialCenterX;
+    this.centerY = this.initialCenterY;
+    this.scale = this.initialScale;
+  }
 
-        // Position Y locale dans le canvas.
-        const localY = mouseY - rect.top;
+  // Niveau de zoom indicatif.
+  // 0 au départ, augmente quand scale diminue.
+  public getZoomLevel(): number {
+    return Math.max(0, Math.log2(this.initialScale / this.scale));
+  }
 
-        // Coordonnée X normalisée entre 0 et 1.
-        const uvX = localX / rect.width;
+  // Retourne centerX séparé en high/low.
+  public getCenterXSplit(): SplitNumber {
+    return splitNumber(this.centerX);
+  }
 
-        // Coordonnée Y normalisée entre 0 et 1.
-        const uvY = localY / rect.height;
+  // Retourne centerY séparé en high/low.
+  public getCenterYSplit(): SplitNumber {
+    return splitNumber(this.centerY);
+  }
 
-        // Coordonnée X centrée autour de 0.
-        // Gauche = -0.5, droite = 0.5.
-        const centeredX = uvX - 0.5;
+  // Retourne scale séparé en high/low.
+  public getScaleSplit(): SplitNumber {
+    return splitNumber(this.scale);
+  }
 
-        // Coordonnée Y centrée autour de 0.
-        // On inverse Y parce que dans le navigateur Y augmente vers le bas,
-        // alors que dans le plan complexe on veut Y qui augmente vers le haut.
-        const centeredY = 0.5 - uvY;
+  // Convertit une position souris en coordonnées du plan complexe.
+  public screenToComplex(mouseX: number, mouseY: number, rect: DOMRect): Point2D {
+    // Position locale de la souris dans le canvas.
+    const localX = mouseX - rect.left;
+    const localY = mouseY - rect.top;
 
-        // Ratio largeur / hauteur du canvas.
-        const aspect = rect.width / rect.height;
+    // Coordonnées normalisées entre 0 et 1.
+    const uvX = localX / rect.width;
+    const uvY = localY / rect.height;
 
-        // Conversion vers le plan complexe.
-        return {
-            x: this.centerX + centeredX * aspect * this.scale,
-            y: this.centerY + centeredY * this.scale,
-        };
-    }
+    // Recentre x autour de 0.
+    const centeredX = uvX - 0.5;
 
-    // Zoome autour d'un point précis de l'écran.
-    public zoomAt(
-        // Position X de la souris.
-        mouseX: number,
+    // Inverse y : écran vers le bas, plan complexe vers le haut.
+    const centeredY = 0.5 - uvY;
 
-        // Position Y de la souris.
-        mouseY: number,
+    // Ratio largeur / hauteur.
+    const aspect = rect.width / rect.height;
 
-        // Rectangle du canvas.
-        rect: DOMRect,
+    // Conversion écran -> plan complexe.
+    return {
+      x: this.centerX + centeredX * aspect * this.scale,
+      y: this.centerY + centeredY * this.scale,
+    };
+  }
 
-        // deltaY vient de l'événement wheel.
-        // deltaY < 0 : zoom in.
-        // deltaY > 0 : zoom out.
-        deltaY: number,
-    ): void {
-        // Point complexe sous la souris avant le zoom.
-        const beforeZoom = this.screenToComplex(mouseX, mouseY, rect);
+  // Zoome autour de la souris.
+  public zoomAt(mouseX: number, mouseY: number, rect: DOMRect, deltaY: number): void {
+    // Point complexe sous la souris avant zoom.
+    const beforeZoom = this.screenToComplex(mouseX, mouseY, rect);
 
-        // Facteur de zoom.
-        const zoomFactor = 0.9;
+    // On limite les deltaY énormes envoyés parfois par certains touchpads.
+    const clampedDeltaY = Math.max(-120, Math.min(120, deltaY));
 
-        // Si deltaY < 0, l'utilisateur zoome.
-        if (deltaY < 0) {
-            this.scale *= zoomFactor;
-        } else {
-            // Sinon, il dézoome.
-            this.scale /= zoomFactor;
-        }
+    // Facteur exponentiel :
+    // deltaY < 0 => facteur < 1 => zoom in
+    // deltaY > 0 => facteur > 1 => zoom out
+    const factor = Math.exp(clampedDeltaY * this.wheelZoomStrength);
 
-        // On limite le scale pour éviter des valeurs absurdes.
-        this.scale = Math.max(this.scale, this.minScale);
-        this.scale = Math.min(this.scale, this.maxScale);
+    // Applique le zoom.
+    this.scale *= factor;
 
-        // Point complexe sous la souris après le changement de scale.
-        const afterZoom = this.screenToComplex(mouseX, mouseY, rect);
+    // Clamp de sécurité.
+    this.scale = Math.max(this.minScale, this.scale);
+    this.scale = Math.min(this.maxScale, this.scale);
 
-        // Correction du centre.
-        // But : le point visé avant zoom doit rester sous la souris après zoom.
-        this.centerX += beforeZoom.x - afterZoom.x;
-        this.centerY += beforeZoom.y - afterZoom.y;
-    }
+    // Point complexe sous la souris après zoom.
+    const afterZoom = this.screenToComplex(mouseX, mouseY, rect);
 
-    // Déplace la vue à partir d'un déplacement souris en pixels.
-    public panByPixels(
-        // Déplacement horizontal souris en pixels.
-        deltaX: number,
+    // Corrige le centre pour garder le même point sous le curseur.
+    this.centerX += beforeZoom.x - afterZoom.x;
+    this.centerY += beforeZoom.y - afterZoom.y;
+  }
 
-        // Déplacement vertical souris en pixels.
-        deltaY: number,
+  // Déplacement par drag souris.
+  public panByPixels(deltaX: number, deltaY: number, width: number, height: number): void {
+    // Ratio largeur / hauteur.
+    const aspect = width / height;
 
-        // Largeur du canvas en pixels CSS.
-        width: number,
+    // Conversion pixel -> distance complexe horizontale.
+    const complexDeltaX = (deltaX / width) * this.scale * aspect;
 
-        // Hauteur du canvas en pixels CSS.
-        height: number,
-    ): void {
-        // Ratio largeur / hauteur.
-        const aspect = width / height;
+    // Conversion pixel -> distance complexe verticale.
+    const complexDeltaY = (deltaY / height) * this.scale;
 
-        // Conversion du déplacement horizontal en unités du plan complexe.
-        const complexDeltaX = (deltaX / width) * this.scale * aspect;
+    // Drag vers la droite = caméra vers la gauche.
+    this.centerX -= complexDeltaX;
 
-        // Conversion du déplacement vertical en unités du plan complexe.
-        const complexDeltaY = (deltaY / height) * this.scale;
-
-        // Quand on tire l'image vers la droite, la caméra doit aller à gauche.
-        this.centerX -= complexDeltaX;
-
-        // Y écran augmente vers le bas, Y complexe augmente vers le haut.
-        this.centerY += complexDeltaY;
-    }
+    // Y écran vers le bas, Y complexe vers le haut.
+    this.centerY += complexDeltaY;
+  }
 }
