@@ -37,3 +37,41 @@ body {
   /* Le canvas occupe toute la hauteur visible. */
   height: 100vh;
 }
+
+
+/* Overlay de statistiques affiché au-dessus du canvas. */
+#stats-overlay {
+  /* Position fixe par rapport à la fenêtre. */
+  position: fixed;
+
+  /* Placement en haut à gauche. */
+  top: 12px;
+  left: 12px;
+
+  /* Met l'overlay au-dessus du canvas. */
+  z-index: 10;
+
+  /* Fond noir transparent pour rester lisible. */
+  background: rgba(0, 0, 0, 0.65);
+
+  /* Texte clair. */
+  color: white;
+
+  /* Police monospace utile pour les nombres. */
+  font-family: Consolas, Monaco, monospace;
+
+  /* Taille raisonnable. */
+  font-size: 13px;
+
+  /* Espacement interne. */
+  padding: 8px 10px;
+
+  /* Coins légèrement arrondis. */
+  border-radius: 6px;
+
+  /* Empêche l'overlay de capturer la souris. */
+  pointer-events: none;
+
+  /* Hauteur de ligne plus lisible. */
+  line-height: 1.4;
+}
