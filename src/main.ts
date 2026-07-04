@@ -9,7 +9,13 @@ import { Viewport } from "./core/viewport";
 import { attachControls } from "./controls/controls";
 import { StatsOverlay } from "./ui/stats";
 import type { Renderer, ViewState } from "./core/types";
-import { DEFAULT_C, adaptiveMaxIter } from "./core/config";
+import {
+  DEFAULT_C,
+  adaptiveMaxIter,
+  INTERACTIVE_RES_SCALE,
+  INTERACTIVE_MAX_ITER,
+  IDLE_DELAY_MS,
+} from "./core/config";
 import { WebGPURenderer } from "./backends/webgpu/webgpuRenderer";
 import { WebGLRenderer } from "./backends/webgl/webglRenderer";
 
@@ -39,22 +45,28 @@ async function createRenderer(): Promise<Renderer> {
 const renderer = await createRenderer();
 
 let frameId: number | null = null;
+let idleTimer: number | null = null;
 let renderCount = 0;
+
+// Pendant une interaction (zoom/pan), on rend en réduit pour rester fluide ;
+// une passe nette suit dès que l'input s'arrête.
+let interacting = false;
 
 // Construit l'état de vue de la frame à partir de la caméra + config.
 function buildView(): ViewState {
+  const fullIter = adaptiveMaxIter(viewport.getZoomLevel());
   return {
     centerX: viewport.centerX,
     centerY: viewport.centerY,
     scale: viewport.scale,
     cx: DEFAULT_C.x,
     cy: DEFAULT_C.y,
-    maxIter: adaptiveMaxIter(viewport.getZoomLevel()),
+    maxIter: interacting ? Math.min(fullIter, INTERACTIVE_MAX_ITER) : fullIter,
   };
 }
 
 function render(): void {
-  renderer.resize();
+  renderer.resize(interacting ? INTERACTIVE_RES_SCALE : 1);
   const view = buildView();
   const info = renderer.render(view);
 
@@ -72,8 +84,8 @@ function render(): void {
   });
 }
 
-// Coalesce plusieurs demandes en un seul rendu à la prochaine frame.
-function requestRender(): void {
+// Planifie un rendu à la prochaine frame (coalesce plusieurs demandes en une).
+function scheduleFrame(): void {
   if (frameId !== null) {
     return;
   }
@@ -81,6 +93,20 @@ function requestRender(): void {
     frameId = null;
     render();
   });
+}
+
+// Appelé à chaque input : rendu rapide immédiat, puis rendu net après un repos.
+function requestRender(): void {
+  interacting = true;
+  if (idleTimer !== null) {
+    clearTimeout(idleTimer);
+  }
+  idleTimer = window.setTimeout(() => {
+    idleTimer = null;
+    interacting = false;
+    scheduleFrame(); // passe nette finale, pleine résolution + itérations complètes
+  }, IDLE_DELAY_MS);
+  scheduleFrame();
 }
 
 attachControls(canvas, viewport, requestRender);

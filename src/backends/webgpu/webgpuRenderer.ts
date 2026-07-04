@@ -6,7 +6,7 @@
 
 import type { Renderer, ViewState, RenderInfo } from "../../core/types";
 import { computeReferenceOrbit } from "../../core/referenceOrbit";
-import { MAX_ITER_LIMIT } from "../../core/config";
+import { MAX_ITER_LIMIT, MAX_DPR } from "../../core/config";
 
 // Le shader est importé comme texte brut (Vite, ?raw), il reste dans son fichier.
 import shaderCode from "./julia.wgsl?raw";
@@ -151,11 +151,12 @@ export class WebGPURenderer implements Renderer {
     return { cpuMs: performance.now() - start, refLength: orbit.length };
   }
 
-  // Ajuste la résolution interne du canvas à la taille affichée.
-  public resize(): void {
-    const dpr = window.devicePixelRatio || 1;
-    const width = Math.max(1, Math.floor(this.canvas.clientWidth * dpr));
-    const height = Math.max(1, Math.floor(this.canvas.clientHeight * dpr));
+  // Ajuste la résolution interne du canvas. qualityScale réduit la résolution
+  // pendant l'interaction pour rester fluide.
+  public resize(qualityScale = 1): void {
+    const dpr = Math.min(window.devicePixelRatio || 1, MAX_DPR);
+    const width = Math.max(1, Math.floor(this.canvas.clientWidth * dpr * qualityScale));
+    const height = Math.max(1, Math.floor(this.canvas.clientHeight * dpr * qualityScale));
 
     if (this.canvas.width !== width || this.canvas.height !== height) {
       this.canvas.width = width;

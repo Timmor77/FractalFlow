@@ -43,6 +43,7 @@ export interface Renderer {
   // Dessine une frame pour l'état de vue donné.
   render(view: ViewState): RenderInfo;
 
-  // Réajuste la taille interne du canvas si la fenêtre a changé.
-  resize(): void;
+  // Réajuste la taille interne du canvas. qualityScale < 1 réduit la résolution
+  // (rendu rapide pendant l'interaction) ; 1 = pleine résolution.
+  resize(qualityScale?: number): void;
 }

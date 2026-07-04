@@ -8,7 +8,7 @@
 
 import type { Renderer, ViewState, RenderInfo } from "../../core/types";
 import { ddToNumber } from "../../core/doubleDouble";
-import { MAX_ITER_LIMIT } from "../../core/config";
+import { MAX_ITER_LIMIT, MAX_DPR } from "../../core/config";
 
 // Découpe un float64 en float32 hi + reste lo (représentation double-single).
 function splitNumber(value: number): { high: number; low: number } {
@@ -253,10 +253,10 @@ export class WebGLRenderer implements Renderer {
     return { cpuMs: performance.now() - start, refLength: 0 };
   }
 
-  public resize(): void {
-    const dpr = window.devicePixelRatio || 1;
-    const width = Math.max(1, Math.floor(this.canvas.clientWidth * dpr));
-    const height = Math.max(1, Math.floor(this.canvas.clientHeight * dpr));
+  public resize(qualityScale = 1): void {
+    const dpr = Math.min(window.devicePixelRatio || 1, MAX_DPR);
+    const width = Math.max(1, Math.floor(this.canvas.clientWidth * dpr * qualityScale));
+    const height = Math.max(1, Math.floor(this.canvas.clientHeight * dpr * qualityScale));
     if (this.canvas.width !== width || this.canvas.height !== height) {
       this.canvas.width = width;
       this.canvas.height = height;
