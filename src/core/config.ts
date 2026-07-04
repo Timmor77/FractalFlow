@@ -22,15 +22,14 @@ export function adaptiveMaxIter(zoomLevel: number): number {
 }
 
 // --- Rendu adaptatif : rester fluide pendant l'interaction ---
-// Le coût GPU est proportionnel à (pixels × itérations). Pendant un zoom/pan on
-// rend donc en réduit (rapide), puis on refait une passe nette une fois l'input
-// arrêté. C'est ce qui supprime les à-coups en zoom profond.
+// Le coût GPU croît avec (pixels × itérations). Pendant un zoom/pan on plafonne
+// les itérations (rapide, on garde la pleine résolution) ; une passe nette avec
+// toutes les itérations suit dès que l'input s'arrête. On ne redimensionne PAS le
+// canvas pendant l'interaction : sa taille reste stable, ce qui évite tout
+// artefact de présentation.
 
 // Plafond du devicePixelRatio (le coût croît avec le carré de la résolution).
 export const MAX_DPR = 2;
-
-// Facteur de résolution pendant l'interaction (0.5 = 4× moins de pixels).
-export const INTERACTIVE_RES_SCALE = 0.5;
 
 // Itérations plafonnées pendant l'interaction (détail réduit, mais fluide).
 export const INTERACTIVE_MAX_ITER = 400;

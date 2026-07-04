@@ -253,10 +253,10 @@ export class WebGLRenderer implements Renderer {
     return { cpuMs: performance.now() - start, refLength: 0 };
   }
 
-  public resize(qualityScale = 1): void {
+  public resize(): void {
     const dpr = Math.min(window.devicePixelRatio || 1, MAX_DPR);
-    const width = Math.max(1, Math.floor(this.canvas.clientWidth * dpr * qualityScale));
-    const height = Math.max(1, Math.floor(this.canvas.clientHeight * dpr * qualityScale));
+    const width = Math.max(1, Math.floor(this.canvas.clientWidth * dpr));
+    const height = Math.max(1, Math.floor(this.canvas.clientHeight * dpr));
     if (this.canvas.width !== width || this.canvas.height !== height) {
       this.canvas.width = width;
       this.canvas.height = height;

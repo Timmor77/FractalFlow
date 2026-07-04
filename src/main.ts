@@ -9,13 +9,7 @@ import { Viewport } from "./core/viewport";
 import { attachControls } from "./controls/controls";
 import { StatsOverlay } from "./ui/stats";
 import type { Renderer, ViewState } from "./core/types";
-import {
-  DEFAULT_C,
-  adaptiveMaxIter,
-  INTERACTIVE_RES_SCALE,
-  INTERACTIVE_MAX_ITER,
-  IDLE_DELAY_MS,
-} from "./core/config";
+import { DEFAULT_C, adaptiveMaxIter, INTERACTIVE_MAX_ITER, IDLE_DELAY_MS } from "./core/config";
 import { WebGPURenderer } from "./backends/webgpu/webgpuRenderer";
 import { WebGLRenderer } from "./backends/webgl/webglRenderer";
 
@@ -48,8 +42,8 @@ let frameId: number | null = null;
 let idleTimer: number | null = null;
 let renderCount = 0;
 
-// Pendant une interaction (zoom/pan), on rend en réduit pour rester fluide ;
-// une passe nette suit dès que l'input s'arrête.
+// Pendant une interaction (zoom/pan), on plafonne les itérations pour rester
+// fluide ; une passe nette (toutes itérations) suit dès que l'input s'arrête.
 let interacting = false;
 
 // Construit l'état de vue de la frame à partir de la caméra + config.
@@ -66,7 +60,7 @@ function buildView(): ViewState {
 }
 
 function render(): void {
-  renderer.resize(interacting ? INTERACTIVE_RES_SCALE : 1);
+  renderer.resize();
   const view = buildView();
   const info = renderer.render(view);
 
