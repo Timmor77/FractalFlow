@@ -9,7 +9,7 @@ import { Viewport } from "./core/viewport";
 import { attachControls } from "./controls/controls";
 import { StatsOverlay } from "./ui/stats";
 import type { Renderer, ViewState } from "./core/types";
-import { DEFAULT_C, adaptiveMaxIter, INTERACTIVE_MAX_ITER, IDLE_DELAY_MS } from "./core/config";
+import { DEFAULT_C, adaptiveMaxIter, INTERACTIVE_RES_SCALE, IDLE_DELAY_MS } from "./core/config";
 import { WebGPURenderer } from "./backends/webgpu/webgpuRenderer";
 import { WebGLRenderer } from "./backends/webgl/webglRenderer";
 
@@ -42,25 +42,25 @@ let frameId: number | null = null;
 let idleTimer: number | null = null;
 let renderCount = 0;
 
-// Pendant une interaction (zoom/pan), on plafonne les itérations pour rester
-// fluide ; une passe nette (toutes itérations) suit dès que l'input s'arrête.
+// Pendant une interaction (zoom/pan), on rend en résolution réduite pour rester
+// fluide ; une passe pleine résolution suit dès que l'input s'arrête.
 let interacting = false;
 
 // Construit l'état de vue de la frame à partir de la caméra + config.
+// Les itérations restent complètes même en interaction (sinon zones noires).
 function buildView(): ViewState {
-  const fullIter = adaptiveMaxIter(viewport.getZoomLevel());
   return {
     centerX: viewport.centerX,
     centerY: viewport.centerY,
     scale: viewport.scale,
     cx: DEFAULT_C.x,
     cy: DEFAULT_C.y,
-    maxIter: interacting ? Math.min(fullIter, INTERACTIVE_MAX_ITER) : fullIter,
+    maxIter: adaptiveMaxIter(viewport.getZoomLevel()),
   };
 }
 
 function render(): void {
-  renderer.resize();
+  renderer.resize(interacting ? INTERACTIVE_RES_SCALE : 1);
   const view = buildView();
   const info = renderer.render(view);
 
