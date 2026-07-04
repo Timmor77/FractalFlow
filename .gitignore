@@ -22,3 +22,16 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Generated renders and benchmark data (kept out of git; see docs/ for curated images)
+artifacts/*
+!artifacts/.gitkeep
+
+# Build output
+cuda/*.exe
+cuda/*.exp
+cuda/*.lib
+cuda/*.obj
+
+
+

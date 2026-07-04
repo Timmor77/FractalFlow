@@ -1,48 +1,52 @@
-// Données affichées dans l'overlay de stats.
+// Overlay de statistiques affiché en haut à gauche.
+// Purement informatif : backend actif, temps de rendu, position, zoom.
+
 export type StatsData = {
+  // Backend de rendu actif ("WebGPU" ou "WebGL2").
+  backend: string;
+
   // Nombre total de rendus effectués.
   renderCount: number;
 
-  // Temps CPU approximatif du dernier rendu.
+  // Temps CPU du dernier rendu, en millisecondes.
   lastRenderMs: number;
 
-  // Centre X de la caméra.
-  centerX: number;
+  // Longueur de l'orbite de référence (perturbation). 0 pour WebGL2.
+  refLength: number;
 
-  // Centre Y de la caméra.
+  // Centre de la caméra (approché en float64 pour l'affichage).
+  centerX: number;
   centerY: number;
 
-  // Taille verticale visible.
+  // Taille verticale visible dans le plan complexe.
   scale: number;
 
-  // Niveau de zoom indicatif.
+  // Niveau de zoom indicatif (1 niveau = ×2).
   zoomLevel: number;
 
-  // Nombre d'itérations réellement envoyé au shader.
+  // Itérations envoyées au rendu.
   maxIter: number;
 };
 
-// Overlay HTML simple.
 export class StatsOverlay {
-  // Élément HTML principal.
   private readonly element: HTMLDivElement;
 
   constructor() {
-    // Crée une div.
     this.element = document.createElement("div");
-
-    // Id utilisé par le CSS.
     this.element.id = "stats-overlay";
-
-    // Ajoute l'overlay à la page.
     document.body.appendChild(this.element);
   }
 
-  // Met à jour le contenu affiché.
   public update(data: StatsData): void {
+    // La ligne "ref orbit" n'a de sens que pour la perturbation (WebGPU).
+    const refLine =
+      data.refLength > 0 ? `<div>ref orbit: ${data.refLength}</div>` : "";
+
     this.element.innerHTML = `
+      <div>backend: ${data.backend}</div>
       <div>renders: ${data.renderCount}</div>
       <div>last render: ${data.lastRenderMs.toFixed(3)} ms</div>
+      ${refLine}
       <div>centerX: ${data.centerX.toExponential(6)}</div>
       <div>centerY: ${data.centerY.toExponential(6)}</div>
       <div>scale: ${data.scale.toExponential(6)}</div>
