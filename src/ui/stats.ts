@@ -11,6 +11,9 @@ export type StatsData = {
   // Temps CPU du dernier rendu, en millisecondes.
   lastRenderMs: number;
 
+  // Images par seconde (moyenne glissante), 0 tant qu'inconnu.
+  fps: number;
+
   // Longueur de l'orbite de référence (perturbation). 0 pour WebGL2.
   refLength: number;
 
@@ -42,17 +45,19 @@ export class StatsOverlay {
     const refLine =
       data.refLength > 0 ? `<div>ref orbit: ${data.refLength}</div>` : "";
 
+    const fpsLine = data.fps > 0 ? `<div>fps: ${data.fps.toFixed(0)}</div>` : "";
+
     this.element.innerHTML = `
+      <div class="stats-title">FractalFlow</div>
       <div>backend: ${data.backend}</div>
-      <div>renders: ${data.renderCount}</div>
-      <div>last render: ${data.lastRenderMs.toFixed(3)} ms</div>
+      ${fpsLine}
+      <div>last render: ${data.lastRenderMs.toFixed(2)} ms</div>
       ${refLine}
       <div>centerX: ${data.centerX.toExponential(6)}</div>
       <div>centerY: ${data.centerY.toExponential(6)}</div>
       <div>scale: ${data.scale.toExponential(6)}</div>
-      <div>zoom level: ${data.zoomLevel.toFixed(2)}</div>
+      <div>zoom: ×${Math.pow(2, data.zoomLevel).toExponential(2)}</div>
       <div>maxIter: ${data.maxIter}</div>
-      <div>reset: R</div>
     `;
   }
 }

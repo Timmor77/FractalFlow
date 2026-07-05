@@ -37,3 +37,14 @@ export const INTERACTIVE_RES_SCALE = 0.5;
 
 // Délai sans input avant la passe de rendu nette finale (ms).
 export const IDLE_DELAY_MS = 160;
+
+// --- Export image ---
+// Côté le plus long (px) visé pour l'export PNG « pleine qualité ». Le backend le
+// borne ensuite à la taille de texture max du GPU (en gardant l'aspect).
+export const EXPORT_MAX_SIDE = 8192;
+
+// --- Animation d'intro ---
+// Au chargement, la vue démarre un peu dézoomée puis rejoint la vue par défaut en
+// douceur. Purement esthétique ; annulée dès la première interaction.
+export const INTRO_DURATION_MS = 1500;
+export const INTRO_START_SCALE = 6.0; // la vue par défaut vaut 3.0

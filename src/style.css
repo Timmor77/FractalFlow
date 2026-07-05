@@ -74,4 +74,181 @@ body {
 
   /* Hauteur de ligne plus lisible. */
   line-height: 1.4;
+
+  /* Bordure fine + flou pour un rendu « verre ». */
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(10px);
+
+  /* Apparition douce au chargement. */
+  animation: fade-in 0.9s ease both;
+}
+
+/* Titre de l'overlay de stats. */
+.stats-title {
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  margin-bottom: 4px;
+  color: #8fb3ff;
+}
+
+/* Apparition en fondu (intro). */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Le canvas apparaît lui aussi en douceur au chargement. */
+#fractal-canvas {
+  animation: fade-in 1.1s ease both;
+}
+
+/* --- Panneau de contrôle (bas droite) --- */
+.control-panel {
+  position: fixed;
+  bottom: 16px;
+  right: 16px;
+  z-index: 10;
+
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 260px;
+  padding: 14px;
+
+  color: #e8ecf4;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 13px;
+
+  background: rgba(15, 18, 28, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 14px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(14px);
+
+  animation: fade-in 1s ease 0.2s both;
+}
+
+.panel-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.panel-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #9aa4b8;
+}
+
+/* Rangée de pastilles de palette. */
+.swatches {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.swatch {
+  width: 34px;
+  height: 24px;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  background-size: cover;
+  transition: transform 0.12s ease, border-color 0.12s ease;
+}
+
+.swatch:hover {
+  transform: translateY(-1px);
+}
+
+.swatch.active {
+  border-color: #ffffff;
+  box-shadow: 0 0 0 2px rgba(140, 172, 255, 0.55);
+}
+
+/* Mini carte de Mandelbrot (sélection de c). */
+.mandelbrot-picker {
+  position: relative;
+  border-radius: 8px;
+  overflow: hidden;
+  cursor: crosshair;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.mandelbrot-picker canvas {
+  display: block;
+}
+
+/* Marqueur (croix cerclée) indiquant le c courant. */
+.mandelbrot-marker {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border: 2px solid #ffffff;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6), 0 0 6px rgba(0, 0, 0, 0.7);
+  pointer-events: none;
+}
+
+.mandelbrot-marker::after {
+  content: "";
+  position: absolute;
+  inset: 4px;
+  background: #ffffff;
+  border-radius: 50%;
+}
+
+.c-readout {
+  font-family: Consolas, Monaco, monospace;
+  font-size: 12px;
+  color: #cdd6ea;
+}
+
+/* Boutons d'action. */
+.panel-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.action-button {
+  padding: 9px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 9px;
+  color: #e8ecf4;
+  background: rgba(255, 255, 255, 0.06);
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.12s ease, transform 0.12s ease, opacity 0.12s ease;
+}
+
+.action-button:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.action-button:active {
+  transform: translateY(1px);
+}
+
+.action-button.primary {
+  border-color: transparent;
+  background: linear-gradient(135deg, #6d8bff, #9b6dff);
+  font-weight: 600;
+}
+
+.action-button.primary:hover {
+  background: linear-gradient(135deg, #7f9aff, #a97eff);
+}
+
+.action-button:disabled {
+  opacity: 0.6;
+  cursor: default;
 }

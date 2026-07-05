@@ -8,6 +8,7 @@
 
 import type { Renderer, ViewState, RenderInfo } from "../../core/types";
 import { ddToNumber } from "../../core/doubleDouble";
+import { canvasToPng } from "../../core/image";
 import { MAX_ITER_LIMIT, MAX_DPR } from "../../core/config";
 
 // Découpe un float64 en float32 hi + reste lo (représentation double-single).
@@ -35,6 +36,12 @@ uniform vec2 u_scaleDS;    // (scale.hi, scale.lo)
 uniform vec2 u_cHigh;      // (cx.hi, cy.hi)
 uniform vec2 u_cLow;       // (cx.lo, cy.lo)
 uniform int u_maxIter;
+
+// Palette cosinus d'IQ : couleur(t) = a + b·cos(2π·(c·t + d)). Fournie par le CPU.
+uniform vec3 u_palA;
+uniform vec3 u_palB;
+uniform vec3 u_palC;
+uniform vec3 u_palD;
 
 out vec4 outColor;
 
@@ -77,7 +84,7 @@ vec2 dsMulFloat(vec2 a, float b) {
 float dsToFloat(vec2 a) { return a.x + a.y; }
 
 vec3 palette(float t) {
-  return 0.5 + 0.5 * cos(6.28318 * (vec3(0.0, 0.33, 0.67) + t));
+  return u_palA + u_palB * cos(6.28318 * (u_palC * t + u_palD));
 }
 
 void main() {
@@ -186,12 +193,18 @@ export class WebGLRenderer implements Renderer {
     cHigh: WebGLUniformLocation;
     cLow: WebGLUniformLocation;
     maxIter: WebGLUniformLocation;
+    palA: WebGLUniformLocation;
+    palB: WebGLUniformLocation;
+    palC: WebGLUniformLocation;
+    palD: WebGLUniformLocation;
   };
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
 
-    const gl = canvas.getContext("webgl2");
+    // preserveDrawingBuffer : nécessaire pour que toBlob (save image) relise bien
+    // le contenu dessiné après coup. Coût négligeable pour un viewer de fractale.
+    const gl = canvas.getContext("webgl2", { preserveDrawingBuffer: true });
     if (!gl) {
       throw new Error("WebGL2 non supporté par ce navigateur");
     }
@@ -220,6 +233,10 @@ export class WebGLRenderer implements Renderer {
       cHigh: getUniform(gl, this.program, "u_cHigh"),
       cLow: getUniform(gl, this.program, "u_cLow"),
       maxIter: getUniform(gl, this.program, "u_maxIter"),
+      palA: getUniform(gl, this.program, "u_palA"),
+      palB: getUniform(gl, this.program, "u_palB"),
+      palC: getUniform(gl, this.program, "u_palC"),
+      palD: getUniform(gl, this.program, "u_palD"),
     };
 
     // Garde-fou : la borne du shader (4096) doit rester > au plafond d'itérations.
@@ -248,6 +265,11 @@ export class WebGLRenderer implements Renderer {
     gl.uniform2f(this.u.cHigh, cRe.high, cIm.high);
     gl.uniform2f(this.u.cLow, cRe.low, cIm.low);
     gl.uniform1i(this.u.maxIter, view.maxIter);
+    const pal = view.palette;
+    gl.uniform3f(this.u.palA, pal.a[0], pal.a[1], pal.a[2]);
+    gl.uniform3f(this.u.palB, pal.b[0], pal.b[1], pal.b[2]);
+    gl.uniform3f(this.u.palC, pal.c[0], pal.c[1], pal.c[2]);
+    gl.uniform3f(this.u.palD, pal.d[0], pal.d[1], pal.d[2]);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
 
     return { cpuMs: performance.now() - start, refLength: 0 };
@@ -262,5 +284,23 @@ export class WebGLRenderer implements Renderer {
       this.canvas.height = height;
     }
     this.gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+  }
+
+  // Export pleine qualité : on agrandit le backing store, on dessine, on lit le
+  // PNG, puis on restaure la taille d'affichage. On borne à la taille de texture
+  // max du GPU (en gardant l'aspect) pour ne jamais échouer silencieusement.
+  public async capture(view: ViewState, width: number, height: number): Promise<Blob> {
+    const max = this.gl.getParameter(this.gl.MAX_TEXTURE_SIZE) as number;
+    const scale = Math.min(1, max / Math.max(width, height));
+    const w = Math.max(1, Math.floor(width * scale));
+    const h = Math.max(1, Math.floor(height * scale));
+    this.canvas.width = w;
+    this.canvas.height = h;
+    this.gl.viewport(0, 0, w, h);
+    this.render(view);
+    const blob = await canvasToPng(this.canvas);
+    this.resize();
+    this.render(view); // laisse une frame nette à l'écran après l'export
+    return blob;
   }
 }

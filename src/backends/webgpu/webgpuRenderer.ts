@@ -6,14 +6,16 @@
 
 import type { Renderer, ViewState, RenderInfo } from "../../core/types";
 import { computeReferenceOrbit } from "../../core/referenceOrbit";
+import { canvasToPng } from "../../core/image";
 import { MAX_ITER_LIMIT, MAX_DPR } from "../../core/config";
 
 // Le shader est importé comme texte brut (Vite, ?raw), il reste dans son fichier.
 import shaderCode from "./julia.wgsl?raw";
 
 // Taille du bloc d'uniformes (voir struct Uniforms dans le shader).
-// resolution(8) + scale(4) + aspect(4) + maxIter(4) + refLength(4) = 24, arrondi à 32.
-const UNIFORM_SIZE = 32;
+// En-tête : resolution(8)+scale(4)+aspect(4)+maxIter(4)+refLength(4)+pad(8) = 32.
+// Palette : 4 × vec4f alignés sur 16 octets = 64. Total = 96.
+const UNIFORM_SIZE = 96;
 
 export class WebGPURenderer implements Renderer {
   public readonly name = "WebGPU";
@@ -119,7 +121,7 @@ export class WebGPURenderer implements Renderer {
     );
     device.queue.writeBuffer(this.orbitBuffer, 0, orbit.data, 0, orbit.length * 2);
 
-    // 2) Uniformes.
+    // 2) Uniformes. En-tête (indices f32 0..5) puis palette (voir struct Uniforms).
     const f = new Float32Array(this.uniformData);
     const uint = new Uint32Array(this.uniformData);
     f[0] = this.canvas.width;
@@ -128,6 +130,12 @@ export class WebGPURenderer implements Renderer {
     f[3] = this.canvas.width / this.canvas.height;
     uint[4] = view.maxIter;
     uint[5] = orbit.length;
+    // Palette à partir de l'octet 32 (f32 index 8) : 4 vec4f, on ne remplit que xyz.
+    const pal = view.palette;
+    f[8] = pal.a[0]; f[9] = pal.a[1]; f[10] = pal.a[2];
+    f[12] = pal.b[0]; f[13] = pal.b[1]; f[14] = pal.b[2];
+    f[16] = pal.c[0]; f[17] = pal.c[1]; f[18] = pal.c[2];
+    f[20] = pal.d[0]; f[21] = pal.d[1]; f[22] = pal.d[2];
     device.queue.writeBuffer(this.uniformBuffer, 0, this.uniformData);
 
     // 3) Passe de rendu : triangle plein écran (3 sommets).
@@ -162,5 +170,21 @@ export class WebGPURenderer implements Renderer {
       this.canvas.width = width;
       this.canvas.height = height;
     }
+  }
+
+  // Export pleine qualité : on agrandit le backing store du canvas à la taille
+  // demandée (la taille CSS d'affichage ne bouge pas), on dessine une frame, on
+  // lit le PNG, puis on restaure la taille d'affichage. On borne à la taille de
+  // texture max du GPU (en gardant l'aspect) pour ne jamais échouer silencieusement.
+  public async capture(view: ViewState, width: number, height: number): Promise<Blob> {
+    const max = this.device.limits.maxTextureDimension2D;
+    const scale = Math.min(1, max / Math.max(width, height));
+    this.canvas.width = Math.max(1, Math.floor(width * scale));
+    this.canvas.height = Math.max(1, Math.floor(height * scale));
+    this.render(view);
+    const blob = await canvasToPng(this.canvas);
+    this.resize();
+    this.render(view); // laisse une frame nette à l'écran après l'export
+    return blob;
   }
 }

@@ -18,6 +18,13 @@ struct Uniforms {
   aspect : f32,     // largeur / hauteur
   maxIter : u32,
   refLength : u32,  // nombre de points valides dans l'orbite de référence
+  _pad : vec2u,     // padding pour aligner les vec4 suivants sur 16 octets
+  // Palette cosinus d'IQ : couleur(t) = a + b·cos(2π·(c·t + d)). Fournie par le
+  // CPU (ui/palettes.ts) : aucune couleur codée en dur ici. On n'utilise que .xyz.
+  palA : vec4f,
+  palB : vec4f,
+  palC : vec4f,
+  palD : vec4f,
 };
 
 @group(0) @binding(0) var<uniform> u : Uniforms;
@@ -32,9 +39,9 @@ fn vs(@builtin(vertex_index) vi : u32) -> @builtin(position) vec4f {
   return vec4f(pts[vi], 0.0, 1.0);
 }
 
-// Palette cyclique douce (cosinus décalés).
+// Palette cyclique douce, paramétrée par les uniformes (cosinus décalés).
 fn palette(t : f32) -> vec3f {
-  return 0.5 + 0.5 * cos(6.28318 * (vec3f(0.0, 0.33, 0.67) + t));
+  return u.palA.xyz + u.palB.xyz * cos(6.28318 * (u.palC.xyz * t + u.palD.xyz));
 }
 
 @fragment
