@@ -32,11 +32,22 @@ export function adaptiveMaxIter(zoomLevel: number): number {
 // Plafond du devicePixelRatio (le coût croît avec le carré de la résolution).
 export const MAX_DPR = 2;
 
-// Facteur de résolution pendant l'interaction (0.5 = 4× moins de pixels, ~4× plus rapide).
-export const INTERACTIVE_RES_SCALE = 0.5;
+// Facteur de résolution pendant l'interaction. C'est une valeur de DÉPART :
+// elle s'ajuste ensuite selon la cadence réelle (voir main.ts). Plus haut = plus
+// net en mouvement ; on baisse seulement si le GPU n'arrive pas à suivre.
+export const INTERACTIVE_RES_SCALE = 0.7;
+
+// Bornes de l'adaptation de résolution pendant l'interaction.
+export const INTERACTIVE_RES_MIN = 0.4; // plancher si le GPU peine
+export const INTERACTIVE_RES_MAX = 1.0; // plafond (pleine résolution)
+
+// Seuils de temps par frame (ms) qui pilotent l'adaptation :
+// au-dessus de SLOW on réduit la résolution, en dessous de FAST on la remonte.
+export const FRAME_SLOW_MS = 20; // < 50 fps -> on allège
+export const FRAME_FAST_MS = 13; // > ~75 fps -> on peut se permettre plus net
 
 // Délai sans input avant la passe de rendu nette finale (ms).
-export const IDLE_DELAY_MS = 160;
+export const IDLE_DELAY_MS = 110;
 
 // --- Export image ---
 // Côté le plus long (px) visé pour l'export PNG « pleine qualité ». Le backend le

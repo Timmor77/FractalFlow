@@ -37,6 +37,12 @@ export class WebGPURenderer implements Renderer {
   // Dernière LUT de palette uploadée : on ne ré-upload qu'au changement.
   private lastLut: Uint8Array | null = null;
 
+  // Cache de l'orbite de référence : on ne la recalcule (et ré-upload) que si le
+  // centre, c ou maxIter changent. Utile pour la passe nette après un arrêt, un
+  // changement de palette, un resize... (mêmes paramètres -> même orbite).
+  private lastOrbit: { data: Float32Array; length: number } | null = null;
+  private lastOrbitKey = "";
+
   private constructor(
     canvas: HTMLCanvasElement,
     device: GPUDevice,
@@ -131,15 +137,16 @@ export class WebGPURenderer implements Renderer {
     const start = performance.now();
     const device = this.device;
 
-    // 1) Orbite de référence (CPU, haute précision) -> GPU.
-    const orbit = computeReferenceOrbit(
-      view.centerX,
-      view.centerY,
-      view.cx,
-      view.cy,
-      view.maxIter,
-    );
-    device.queue.writeBuffer(this.orbitBuffer, 0, orbit.data, 0, orbit.length * 2);
+    // 1) Orbite de référence (CPU, haute précision) -> GPU. On la met en cache :
+    //    recalcul + upload seulement si le centre / c / maxIter ont changé.
+    const key = `${view.centerX.hi},${view.centerX.lo},${view.centerY.hi},${view.centerY.lo},${view.cx},${view.cy},${view.maxIter}`;
+    let orbit = this.lastOrbit;
+    if (orbit === null || key !== this.lastOrbitKey) {
+      orbit = computeReferenceOrbit(view.centerX, view.centerY, view.cx, view.cy, view.maxIter);
+      device.queue.writeBuffer(this.orbitBuffer, 0, orbit.data, 0, orbit.length * 2);
+      this.lastOrbit = orbit;
+      this.lastOrbitKey = key;
+    }
 
     // 2) Palette : upload de la LUT en texture seulement si elle a changé.
     if (view.paletteLut !== this.lastLut) {

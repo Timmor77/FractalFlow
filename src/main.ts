@@ -16,6 +16,10 @@ import {
   DEFAULT_C,
   adaptiveMaxIter,
   INTERACTIVE_RES_SCALE,
+  INTERACTIVE_RES_MIN,
+  INTERACTIVE_RES_MAX,
+  FRAME_SLOW_MS,
+  FRAME_FAST_MS,
   IDLE_DELAY_MS,
   EXPORT_MAX_SIDE,
   INTRO_DURATION_MS,
@@ -57,7 +61,7 @@ async function createRenderer(): Promise<Renderer> {
 
 const renderer = await createRenderer();
 
-let frameId: number | null = null;
+let rafId: number | null = null;
 let idleTimer: number | null = null;
 let renderCount = 0;
 
@@ -69,8 +73,11 @@ let interacting = false;
 // on gèle les autres rendus pour ne pas relire un canvas à la mauvaise taille.
 let capturing = false;
 
-// Petit calcul de FPS (moyenne glissante) pour l'overlay.
-let lastRenderTime = 0;
+// Résolution d'interaction adaptative (part de la base, s'ajuste à la cadence).
+let interactiveScale = INTERACTIVE_RES_SCALE;
+
+// Cadence : dernier timestamp de frame + FPS lissé pour l'overlay.
+let lastFrameTime = 0;
 let fps = 0;
 
 // Construit l'état de vue de la frame à partir de la caméra + état UI.
@@ -91,19 +98,9 @@ function render(): void {
   if (capturing) {
     return; // l'export pilote lui-même le rendu à ce moment
   }
-  renderer.resize(interacting ? INTERACTIVE_RES_SCALE : 1);
+  renderer.resize(interacting ? interactiveScale : 1);
   const view = buildView();
   const info = renderer.render(view);
-
-  // FPS : uniquement entre deux frames rapprochées (rendu à la demande sinon).
-  const now = performance.now();
-  if (lastRenderTime > 0) {
-    const dt = now - lastRenderTime;
-    if (dt > 0 && dt < 500) {
-      fps = fps > 0 ? fps * 0.8 + (1000 / dt) * 0.2 : 1000 / dt;
-    }
-  }
-  lastRenderTime = now;
 
   renderCount += 1;
   stats.update({
@@ -121,18 +118,52 @@ function render(): void {
   });
 }
 
-// Planifie un rendu à la prochaine frame (coalesce plusieurs demandes en une).
-function scheduleFrame(): void {
-  if (frameId !== null || capturing) {
-    return;
+// Ajuste la résolution d'interaction selon le temps réel par frame : on baisse
+// si le GPU n'arrive pas à suivre (frames longues), on remonte s'il a de la
+// marge. La zone morte entre les deux seuils évite un « clignotement » de netteté.
+function adaptResolution(dt: number): void {
+  if (dt > FRAME_SLOW_MS) {
+    interactiveScale = Math.max(INTERACTIVE_RES_MIN, interactiveScale * 0.85);
+  } else if (dt < FRAME_FAST_MS) {
+    interactiveScale = Math.min(INTERACTIVE_RES_MAX, interactiveScale * 1.06);
   }
-  frameId = requestAnimationFrame(() => {
-    frameId = null;
-    render();
-  });
 }
 
-// Appelé à chaque input : rendu rapide immédiat, puis rendu net après un repos.
+// Boucle de rendu : pendant l'interaction elle tourne à chaque frame d'affichage
+// (pan/zoom plus fluides et cadence mesurable) ; sinon elle rend une seule fois
+// (la passe nette) puis s'arrête.
+function frame(now: number): void {
+  rafId = null;
+
+  if (lastFrameTime > 0) {
+    const dt = now - lastFrameTime;
+    if (dt > 0 && dt < 1000) {
+      fps = fps > 0 ? fps * 0.8 + (1000 / dt) * 0.2 : 1000 / dt;
+      if (interacting) {
+        adaptResolution(dt);
+      }
+    }
+  }
+  lastFrameTime = now;
+
+  render();
+
+  if (interacting && !capturing) {
+    rafId = requestAnimationFrame(frame);
+  } else {
+    lastFrameTime = 0; // repart « à froid » à la prochaine interaction
+  }
+}
+
+// Garantit qu'une frame est planifiée (démarre/relance la boucle).
+function scheduleFrame(): void {
+  if (rafId === null && !capturing) {
+    rafId = requestAnimationFrame(frame);
+  }
+}
+
+// Appelé à chaque input : lance la boucle d'interaction, puis programme la passe
+// nette (pleine résolution) après un court repos sans input.
 function requestRender(): void {
   interacting = true;
   if (idleTimer !== null) {
@@ -164,9 +195,9 @@ async function saveImage(): Promise<void> {
   panel.setSaving(true);
 
   // Annule un rendu en attente : le canvas va être redimensionné pour l'export.
-  if (frameId !== null) {
-    cancelAnimationFrame(frameId);
-    frameId = null;
+  if (rafId !== null) {
+    cancelAnimationFrame(rafId);
+    rafId = null;
   }
 
   try {
