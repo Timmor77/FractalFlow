@@ -37,11 +37,9 @@ uniform vec2 u_cHigh;      // (cx.hi, cy.hi)
 uniform vec2 u_cLow;       // (cx.lo, cy.lo)
 uniform int u_maxIter;
 
-// Palette cosinus d'IQ : couleur(t) = a + b·cos(2π·(c·t + d)). Fournie par le CPU.
-uniform vec3 u_palA;
-uniform vec3 u_palB;
-uniform vec3 u_palC;
-uniform vec3 u_palD;
+// Table de couleurs (LUT 256×1) de la palette, échantillonnée par le compte
+// d'itérations lissé. Texture en mode « repeat » -> coloration cyclique.
+uniform sampler2D u_lut;
 
 out vec4 outColor;
 
@@ -82,10 +80,6 @@ vec2 dsMulFloat(vec2 a, float b) {
   return quickTwoSum(p.x, p.y);
 }
 float dsToFloat(vec2 a) { return a.x + a.y; }
-
-vec3 palette(float t) {
-  return u_palA + u_palB * cos(6.28318 * (u_palC * t + u_palD));
-}
 
 void main() {
   vec2 uv = gl_FragCoord.xy / u_resolution;
@@ -128,10 +122,10 @@ void main() {
     return;
   }
 
-  // Coloration lissée, cohérente avec le backend WebGPU.
+  // Coloration lissée, cohérente avec le backend WebGPU (échantillonne la LUT).
   float nu = log2(0.5 * log2(mag2));
   float smoothIter = float(iter) + 1.0 - nu;
-  outColor = vec4(palette(smoothIter * 0.02), 1.0);
+  outColor = vec4(texture(u_lut, vec2(smoothIter * 0.02, 0.5)).rgb, 1.0);
 }
 `;
 
@@ -184,6 +178,10 @@ export class WebGLRenderer implements Renderer {
   private readonly canvas: HTMLCanvasElement;
   private readonly gl: WebGL2RenderingContext;
   private readonly program: WebGLProgram;
+  private readonly lutTexture: WebGLTexture;
+
+  // Dernière LUT de palette uploadée : on ne ré-upload qu'au changement.
+  private lastLut: Uint8Array | null = null;
 
   private readonly u: {
     resolution: WebGLUniformLocation;
@@ -193,10 +191,7 @@ export class WebGLRenderer implements Renderer {
     cHigh: WebGLUniformLocation;
     cLow: WebGLUniformLocation;
     maxIter: WebGLUniformLocation;
-    palA: WebGLUniformLocation;
-    palB: WebGLUniformLocation;
-    palC: WebGLUniformLocation;
-    palD: WebGLUniformLocation;
+    lut: WebGLUniformLocation;
   };
 
   constructor(canvas: HTMLCanvasElement) {
@@ -233,11 +228,16 @@ export class WebGLRenderer implements Renderer {
       cHigh: getUniform(gl, this.program, "u_cHigh"),
       cLow: getUniform(gl, this.program, "u_cLow"),
       maxIter: getUniform(gl, this.program, "u_maxIter"),
-      palA: getUniform(gl, this.program, "u_palA"),
-      palB: getUniform(gl, this.program, "u_palB"),
-      palC: getUniform(gl, this.program, "u_palC"),
-      palD: getUniform(gl, this.program, "u_palD"),
+      lut: getUniform(gl, this.program, "u_lut"),
     };
+
+    // Texture de palette (256×1) : bouclage horizontal + filtrage linéaire.
+    this.lutTexture = gl.createTexture()!;
+    gl.bindTexture(gl.TEXTURE_2D, this.lutTexture);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
 
     // Garde-fou : la borne du shader (4096) doit rester > au plafond d'itérations.
     if (MAX_ITER_LIMIT >= 4096) {
@@ -265,11 +265,15 @@ export class WebGLRenderer implements Renderer {
     gl.uniform2f(this.u.cHigh, cRe.high, cIm.high);
     gl.uniform2f(this.u.cLow, cRe.low, cIm.low);
     gl.uniform1i(this.u.maxIter, view.maxIter);
-    const pal = view.palette;
-    gl.uniform3f(this.u.palA, pal.a[0], pal.a[1], pal.a[2]);
-    gl.uniform3f(this.u.palB, pal.b[0], pal.b[1], pal.b[2]);
-    gl.uniform3f(this.u.palC, pal.c[0], pal.c[1], pal.c[2]);
-    gl.uniform3f(this.u.palD, pal.d[0], pal.d[1], pal.d[2]);
+
+    // Palette : upload de la LUT seulement si elle a changé, puis bind sur l'unité 0.
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.lutTexture);
+    if (view.paletteLut !== this.lastLut) {
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, view.paletteLut.length / 4, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, view.paletteLut);
+      this.lastLut = view.paletteLut;
+    }
+    gl.uniform1i(this.u.lut, 0);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
 
     return { cpuMs: performance.now() - start, refLength: 0 };

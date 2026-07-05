@@ -28,8 +28,9 @@ export class Viewport {
   // confortable jusqu'à ~1e-28 avant de voir la précision se dégrader.
   private readonly minScale = 1e-28;
 
-  // Limite haute, pour éviter de dézoomer absurdement loin.
-  private readonly maxScale = 100.0;
+  // Limite haute : à peine au-dessus de la vue par défaut (3.0). Au-delà la
+  // fractale rétrécit jusqu'à disparaître, donc on empêche de trop dézoomer.
+  private readonly maxScale = 4.0;
 
   // Intensité du zoom molette (formule exponentielle, souple souris/trackpad).
   private readonly wheelZoomStrength = 0.002;
@@ -46,13 +47,22 @@ export class Viewport {
     return Math.max(0, Math.log2(this.initialScale / this.scale));
   }
 
+  // Vrai quand on a atteint la profondeur maximale (précision du centre DD).
+  // Au-delà, zoomer ne change plus rien : inutile de recalculer l'image.
+  public isAtMaxDepth(): boolean {
+    return this.scale <= this.minScale;
+  }
+
   // Zoome autour de la souris en gardant le point complexe sous le curseur fixe.
   //
   // Le point sous le curseur = centre + offset, où offset = f(curseur) * scale.
   // Pour le garder fixe, il suffit de corriger le centre par (offset_avant - offset_après).
   // Le centre s'annule dans la différence : on n'a besoin QUE de ce petit delta
   // float64, qu'on ajoute proprement au centre double-double.
-  public zoomAt(mouseX: number, mouseY: number, rect: DOMRect, deltaY: number): void {
+  // Renvoie true si la vue a réellement changé. Elle ne change pas quand on est
+  // déjà à une limite (min/max) et qu'on pousse encore dans le même sens : le
+  // caller peut alors éviter un rendu inutile (l'image serait identique).
+  public zoomAt(mouseX: number, mouseY: number, rect: DOMRect, deltaY: number): boolean {
     // Position du curseur, centrée sur 0 et corrigée du ratio d'aspect.
     const localX = mouseX - rect.left;
     const localY = mouseY - rect.top;
@@ -69,10 +79,16 @@ export class Viewport {
 
     this.scale = Math.max(this.minScale, Math.min(this.maxScale, this.scale * factor));
 
+    // Rien n'a bougé (déjà à une borne) : on le signale pour éviter un rendu.
+    if (this.scale === scaleBefore) {
+      return false;
+    }
+
     // Correction du centre = offset_avant - offset_après = f * (scaleBefore - scaleAfter).
     const scaleDelta = scaleBefore - this.scale;
     this.centerX = ddAddNumber(this.centerX, fx * scaleDelta);
     this.centerY = ddAddNumber(this.centerY, fy * scaleDelta);
+    return true;
   }
 
   // Déplacement par drag souris.

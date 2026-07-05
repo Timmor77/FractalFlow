@@ -18,13 +18,6 @@ struct Uniforms {
   aspect : f32,     // largeur / hauteur
   maxIter : u32,
   refLength : u32,  // nombre de points valides dans l'orbite de référence
-  _pad : vec2u,     // padding pour aligner les vec4 suivants sur 16 octets
-  // Palette cosinus d'IQ : couleur(t) = a + b·cos(2π·(c·t + d)). Fournie par le
-  // CPU (ui/palettes.ts) : aucune couleur codée en dur ici. On n'utilise que .xyz.
-  palA : vec4f,
-  palB : vec4f,
-  palC : vec4f,
-  palD : vec4f,
 };
 
 @group(0) @binding(0) var<uniform> u : Uniforms;
@@ -32,16 +25,16 @@ struct Uniforms {
 // Orbite de référence : [Zx0, Zy0, Zx1, Zy1, ...] vue comme un tableau de vec2f.
 @group(0) @binding(1) var<storage, read> refOrbit : array<vec2f>;
 
+// Palette sous forme de table de couleurs (LUT 256×1) construite par le CPU
+// (ui/palettes.ts). Sampler en mode « repeat » -> coloration cyclique et douce.
+@group(0) @binding(2) var paletteLut : texture_2d<f32>;
+@group(0) @binding(3) var paletteSampler : sampler;
+
 // Triangle plein écran généré à partir de l'index de sommet (aucun buffer requis).
 @vertex
 fn vs(@builtin(vertex_index) vi : u32) -> @builtin(position) vec4f {
   var pts = array<vec2f, 3>(vec2f(-1.0, -1.0), vec2f(3.0, -1.0), vec2f(-1.0, 3.0));
   return vec4f(pts[vi], 0.0, 1.0);
-}
-
-// Palette cyclique douce, paramétrée par les uniformes (cosinus décalés).
-fn palette(t : f32) -> vec3f {
-  return u.palA.xyz + u.palB.xyz * cos(6.28318 * (u.palC.xyz * t + u.palD.xyz));
 }
 
 @fragment
@@ -101,6 +94,8 @@ fn fs(@builtin(position) fragCoord : vec4f) -> @location(0) vec4f {
   let mag2 = zx * zx + zy * zy;
   let nu = log2(0.5 * log2(mag2));           // log2(log2(|z|))
   let smoothIter = f32(iter) + 1.0 - nu;
+  // Échantillonne la LUT ; le sampler « repeat » fait cycler la palette.
   let t = smoothIter * 0.02;
-  return vec4f(palette(t), 1.0);
+  let rgb = textureSampleLevel(paletteLut, paletteSampler, vec2f(t, 0.5), 0.0).rgb;
+  return vec4f(rgb, 1.0);
 }

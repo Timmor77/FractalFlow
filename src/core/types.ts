@@ -4,16 +4,6 @@
 
 import type { Dd } from "./doubleDouble";
 
-// Coefficients d'une palette cosinus : couleur(t) = a + b·cos(2π·(c·t + d)).
-// Donnée pure, résolue par main.ts depuis ui/palettes.ts : les backends ne
-// dépendent ainsi jamais de l'interface, juste de ces quatre triplets RGB.
-export type PaletteCoeffs = {
-  a: [number, number, number];
-  b: [number, number, number];
-  c: [number, number, number];
-  d: [number, number, number];
-};
-
 // Instantané de la caméra + paramètres pour UNE frame.
 // C'est de la donnée pure : chaque backend en dérive ce dont il a besoin
 // (WebGPU calcule une orbite de référence, WebGL2 découpe le centre en hi/lo).
@@ -33,8 +23,10 @@ export type ViewState = {
   // Nombre maximum d'itérations pour cette frame.
   maxIter: number;
 
-  // Palette de couleurs à utiliser (coefficients résolus par main.ts).
-  palette: PaletteCoeffs;
+  // Table de couleurs (LUT RGBA 256×1) construite par main.ts depuis la palette
+  // choisie. Le backend l'upload en texture ; la référence ne change qu'au
+  // changement de palette (upload paresseux).
+  paletteLut: Uint8Array;
 };
 
 // Ce qu'un rendu renvoie, pour l'overlay de statistiques.

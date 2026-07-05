@@ -29,6 +29,9 @@ export type StatsData = {
 
   // Itérations envoyées au rendu.
   maxIter: number;
+
+  // Vrai quand la profondeur maximale est atteinte (limite de précision).
+  atMaxDepth: boolean;
 };
 
 export class StatsOverlay {
@@ -46,6 +49,9 @@ export class StatsOverlay {
       data.refLength > 0 ? `<div>ref orbit: ${data.refLength}</div>` : "";
 
     const fpsLine = data.fps > 0 ? `<div>fps: ${data.fps.toFixed(0)}</div>` : "";
+    const limitLine = data.atMaxDepth
+      ? `<div class="stats-limit">⚠ profondeur maximale atteinte</div>`
+      : "";
 
     this.element.innerHTML = `
       <div class="stats-title">FractalFlow</div>
@@ -58,6 +64,7 @@ export class StatsOverlay {
       <div>scale: ${data.scale.toExponential(6)}</div>
       <div>zoom: ×${Math.pow(2, data.zoomLevel).toExponential(2)}</div>
       <div>maxIter: ${data.maxIter}</div>
+      ${limitLine}
     `;
   }
 }

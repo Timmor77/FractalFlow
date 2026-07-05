@@ -51,43 +51,60 @@ export function createControlPanel(opts: ControlPanelOptions): ControlPanel {
   palSection.appendChild(swatches);
   element.appendChild(palSection);
 
-  // --- Section sélecteur de c (mini Mandelbrot) ---
+  // --- Section sélecteur de c (mini Mandelbrot + saisie manuelle) ---
   const cSection = document.createElement("div");
   cSection.className = "panel-section";
-  cSection.appendChild(makeLabel("Paramètre c — glisse sur la carte"));
+  cSection.appendChild(makeLabel("Paramètre c — glisse sur la carte ou saisis"));
 
-  const readout = document.createElement("div");
-  readout.className = "c-readout";
-  const updateReadout = (cx: number, cy: number): void => {
-    const sign = cy >= 0 ? "+" : "−";
-    readout.textContent = `c = ${cx.toFixed(4)} ${sign} ${Math.abs(cy).toFixed(4)} i`;
-  };
+  // Champs de saisie de c (partie réelle + imaginaire).
+  const reInput = makeNumberInput();
+  const imInput = makeNumberInput();
 
+  // La carte met à jour les champs quand on la glisse.
   const picker = createMandelbrotPicker((cx, cy) => {
-    updateReadout(cx, cy);
+    reInput.value = cx.toFixed(4);
+    imInput.value = cy.toFixed(4);
     opts.onPickC(cx, cy);
   });
   cSection.appendChild(picker.element);
-  cSection.appendChild(readout);
+
+  // La saisie manuelle met à jour la carte (marqueur) et la fractale.
+  const applyFromInputs = (): void => {
+    const cx = parseFloat(reInput.value);
+    const cy = parseFloat(imInput.value);
+    if (Number.isFinite(cx) && Number.isFinite(cy)) {
+      picker.setC(cx, cy);
+      opts.onPickC(cx, cy);
+    }
+  };
+  reInput.addEventListener("input", applyFromInputs);
+  imInput.addEventListener("input", applyFromInputs);
+
+  const cInputs = document.createElement("div");
+  cInputs.className = "c-inputs";
+  cInputs.append(makeSpan("c ="), reInput, makeSpan("+"), imInput, makeSpan("i"));
+  cSection.appendChild(cInputs);
   element.appendChild(cSection);
 
-  // Position initiale du marqueur + lecture.
+  // État initial : champs + marqueur.
+  reInput.value = opts.initialC.x.toFixed(4);
+  imInput.value = opts.initialC.y.toFixed(4);
   picker.setC(opts.initialC.x, opts.initialC.y);
-  updateReadout(opts.initialC.x, opts.initialC.y);
 
   // --- Boutons ---
   const actions = document.createElement("div");
   actions.className = "panel-actions";
 
+  const saveLabel = "Enregistrer l'image <kbd>S</kbd>";
   const saveButton = document.createElement("button");
   saveButton.className = "action-button primary";
-  saveButton.textContent = "Enregistrer l'image";
+  saveButton.innerHTML = saveLabel;
   saveButton.addEventListener("click", () => opts.onSave());
   actions.appendChild(saveButton);
 
   const resetButton = document.createElement("button");
   resetButton.className = "action-button";
-  resetButton.textContent = "Réinitialiser la vue";
+  resetButton.innerHTML = "Réinitialiser la vue <kbd>R</kbd>";
   resetButton.addEventListener("click", () => opts.onReset());
   actions.appendChild(resetButton);
 
@@ -97,7 +114,11 @@ export function createControlPanel(opts: ControlPanelOptions): ControlPanel {
     element,
     setSaving(saving: boolean): void {
       saveButton.disabled = saving;
-      saveButton.textContent = saving ? "Génération…" : "Enregistrer l'image";
+      if (saving) {
+        saveButton.textContent = "Génération…";
+      } else {
+        saveButton.innerHTML = saveLabel;
+      }
     },
   };
 }
@@ -107,4 +128,18 @@ function makeLabel(text: string): HTMLElement {
   label.className = "panel-label";
   label.textContent = text;
   return label;
+}
+
+function makeNumberInput(): HTMLInputElement {
+  const input = document.createElement("input");
+  input.type = "number";
+  input.step = "0.001";
+  input.className = "c-input";
+  return input;
+}
+
+function makeSpan(text: string): HTMLSpanElement {
+  const span = document.createElement("span");
+  span.textContent = text;
+  return span;
 }

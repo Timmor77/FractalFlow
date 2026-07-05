@@ -10,7 +10,7 @@ import { Viewport } from "./core/viewport";
 import { attachControls } from "./controls/controls";
 import { StatsOverlay } from "./ui/stats";
 import { createControlPanel } from "./ui/panel";
-import { PALETTES, DEFAULT_PALETTE } from "./ui/palettes";
+import { PALETTES, DEFAULT_PALETTE, buildPaletteLut } from "./ui/palettes";
 import type { Renderer, ViewState } from "./core/types";
 import {
   DEFAULT_C,
@@ -40,6 +40,10 @@ const stats = new StatsOverlay();
 // État piloté par l'interface (le renderer n'en sait rien, il reçoit un ViewState).
 const currentC = { x: DEFAULT_C.x, y: DEFAULT_C.y }; // paramètre c (choisi sur la carte)
 let paletteIndex = DEFAULT_PALETTE; // palette de couleurs choisie
+
+// LUT de chaque palette, construites une fois (références stables : le backend
+// ne ré-upload la texture qu'au changement de palette).
+const paletteLuts = PALETTES.map((palette) => buildPaletteLut(palette));
 
 // WebGPU d'abord (moderne + deep zoom par perturbation) ; WebGL2 en secours.
 async function createRenderer(): Promise<Renderer> {
@@ -79,7 +83,7 @@ function buildView(): ViewState {
     cx: currentC.x,
     cy: currentC.y,
     maxIter: adaptiveMaxIter(viewport.getZoomLevel()),
-    palette: PALETTES[paletteIndex],
+    paletteLut: paletteLuts[paletteIndex],
   };
 }
 
@@ -113,6 +117,7 @@ function render(): void {
     scale: viewport.scale,
     zoomLevel: viewport.getZoomLevel(),
     maxIter: view.maxIter,
+    atMaxDepth: viewport.isAtMaxDepth(),
   });
 }
 
@@ -240,8 +245,27 @@ function runIntro(): void {
   requestAnimationFrame(step);
 }
 
+// --- Indicateur « limite de zoom atteinte » ---
+// Quand on pousse le zoom au-delà de la profondeur max, l'image ne change plus :
+// on ne recalcule rien (voir controls) et on affiche un court message.
+const zoomToast = document.createElement("div");
+zoomToast.className = "zoom-toast";
+zoomToast.textContent = "Profondeur maximale atteinte";
+document.body.appendChild(zoomToast);
+let toastTimer: number | null = null;
+function showZoomLimit(): void {
+  zoomToast.classList.add("visible");
+  if (toastTimer !== null) {
+    clearTimeout(toastTimer);
+  }
+  toastTimer = window.setTimeout(() => {
+    zoomToast.classList.remove("visible");
+    toastTimer = null;
+  }, 1400);
+}
+
 // --- Câblage final ---
-attachControls(canvas, viewport, requestRender);
+attachControls(canvas, viewport, requestRender, showZoomLimit);
 window.addEventListener("resize", requestRender);
 
 // Raccourci : S pour enregistrer l'image.

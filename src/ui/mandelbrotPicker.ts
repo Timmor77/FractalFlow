@@ -127,12 +127,13 @@ export function createMandelbrotPicker(
     return [cx, cy];
   };
 
-  // Repositionne le marqueur à partir d'un c.
+  // Repositionne le marqueur à partir d'un c (borné à la carte : un c saisi
+  // hors champ colle simplement au bord).
   const placeMarker = (cx: number, cy: number): void => {
     const px = ((cx - RE_MIN) / (RE_MAX - RE_MIN)) * MAP_W;
     const py = ((IM_MAX - cy) / (IM_MAX - IM_MIN)) * MAP_H;
-    marker.style.left = `${px}px`;
-    marker.style.top = `${py}px`;
+    marker.style.left = `${Math.max(0, Math.min(MAP_W, px))}px`;
+    marker.style.top = `${Math.max(0, Math.min(MAP_H, py))}px`;
   };
 
   // Traduit un événement pointeur en c, borné à la carte.

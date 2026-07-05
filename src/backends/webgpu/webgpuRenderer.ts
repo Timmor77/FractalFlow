@@ -13,9 +13,11 @@ import { MAX_ITER_LIMIT, MAX_DPR } from "../../core/config";
 import shaderCode from "./julia.wgsl?raw";
 
 // Taille du bloc d'uniformes (voir struct Uniforms dans le shader).
-// En-tête : resolution(8)+scale(4)+aspect(4)+maxIter(4)+refLength(4)+pad(8) = 32.
-// Palette : 4 × vec4f alignés sur 16 octets = 64. Total = 96.
-const UNIFORM_SIZE = 96;
+// resolution(8) + scale(4) + aspect(4) + maxIter(4) + refLength(4) = 24, arrondi à 32.
+const UNIFORM_SIZE = 32;
+
+// Largeur de la table de couleurs (LUT) de palette. Voir ui/palettes.ts.
+const PALETTE_SIZE = 256;
 
 export class WebGPURenderer implements Renderer {
   public readonly name = "WebGPU";
@@ -26,10 +28,14 @@ export class WebGPURenderer implements Renderer {
   private readonly pipeline: GPURenderPipeline;
   private readonly uniformBuffer: GPUBuffer;
   private readonly orbitBuffer: GPUBuffer;
+  private readonly paletteTexture: GPUTexture;
   private readonly bindGroup: GPUBindGroup;
 
   // Tampon CPU réutilisé pour écrire les uniformes (évite de réallouer par frame).
   private readonly uniformData = new ArrayBuffer(UNIFORM_SIZE);
+
+  // Dernière LUT de palette uploadée : on ne ré-upload qu'au changement.
+  private lastLut: Uint8Array | null = null;
 
   private constructor(
     canvas: HTMLCanvasElement,
@@ -61,11 +67,25 @@ export class WebGPURenderer implements Renderer {
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
     });
 
+    // Texture de palette (256×1) + sampler cyclique/linéaire.
+    this.paletteTexture = device.createTexture({
+      size: [PALETTE_SIZE, 1],
+      format: "rgba8unorm",
+      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+    });
+    const paletteSampler = device.createSampler({
+      addressModeU: "repeat",
+      magFilter: "linear",
+      minFilter: "linear",
+    });
+
     this.bindGroup = device.createBindGroup({
       layout: this.pipeline.getBindGroupLayout(0),
       entries: [
         { binding: 0, resource: { buffer: this.uniformBuffer } },
         { binding: 1, resource: { buffer: this.orbitBuffer } },
+        { binding: 2, resource: this.paletteTexture.createView() },
+        { binding: 3, resource: paletteSampler },
       ],
     });
 
@@ -121,7 +141,18 @@ export class WebGPURenderer implements Renderer {
     );
     device.queue.writeBuffer(this.orbitBuffer, 0, orbit.data, 0, orbit.length * 2);
 
-    // 2) Uniformes. En-tête (indices f32 0..5) puis palette (voir struct Uniforms).
+    // 2) Palette : upload de la LUT en texture seulement si elle a changé.
+    if (view.paletteLut !== this.lastLut) {
+      device.queue.writeTexture(
+        { texture: this.paletteTexture },
+        view.paletteLut,
+        { bytesPerRow: PALETTE_SIZE * 4, rowsPerImage: 1 },
+        { width: PALETTE_SIZE, height: 1 },
+      );
+      this.lastLut = view.paletteLut;
+    }
+
+    // 3) Uniformes (voir struct Uniforms).
     const f = new Float32Array(this.uniformData);
     const uint = new Uint32Array(this.uniformData);
     f[0] = this.canvas.width;
@@ -130,15 +161,9 @@ export class WebGPURenderer implements Renderer {
     f[3] = this.canvas.width / this.canvas.height;
     uint[4] = view.maxIter;
     uint[5] = orbit.length;
-    // Palette à partir de l'octet 32 (f32 index 8) : 4 vec4f, on ne remplit que xyz.
-    const pal = view.palette;
-    f[8] = pal.a[0]; f[9] = pal.a[1]; f[10] = pal.a[2];
-    f[12] = pal.b[0]; f[13] = pal.b[1]; f[14] = pal.b[2];
-    f[16] = pal.c[0]; f[17] = pal.c[1]; f[18] = pal.c[2];
-    f[20] = pal.d[0]; f[21] = pal.d[1]; f[22] = pal.d[2];
     device.queue.writeBuffer(this.uniformBuffer, 0, this.uniformData);
 
-    // 3) Passe de rendu : triangle plein écran (3 sommets).
+    // 4) Passe de rendu : triangle plein écran (3 sommets).
     const encoder = device.createCommandEncoder();
     const pass = encoder.beginRenderPass({
       colorAttachments: [

@@ -47,4 +47,4 @@ export const EXPORT_MAX_SIDE = 8192;
 // Au chargement, la vue démarre un peu dézoomée puis rejoint la vue par défaut en
 // douceur. Purement esthétique ; annulée dès la première interaction.
 export const INTRO_DURATION_MS = 1500;
-export const INTRO_START_SCALE = 6.0; // la vue par défaut vaut 3.0
+export const INTRO_START_SCALE = 4.0; // la vue par défaut vaut 3.0 (max = 4.0)

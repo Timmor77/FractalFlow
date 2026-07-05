@@ -1,91 +1,127 @@
 // Palettes de couleurs (source unique de vérité).
 //
-// Chaque palette suit la formule cosinus d'Inigo Quilez :
-//   couleur(t) = a + b · cos(2π · (c·t + d))
-// où a, b, c, d sont des triplets RGB. C'est compact, cyclique et toujours doux.
+// Une palette est une liste de « stops » : des couleurs placées à des positions
+// t ∈ [0, 1]. On en construit une table de correspondance (LUT) de 256 pixels
+// que les shaders échantillonnent avec le compte d'itérations lissé. C'est la
+// méthode d'Ultra Fractal / icefractal : elle rend fidèlement des dégradés
+// multi-teintes (bleu → blanc → or) impossibles avec une simple sinusoïde.
 //
-// Ces quatre vecteurs sont envoyés tels quels aux shaders (WebGPU et WebGL2) via
-// des uniformes : aucun code couleur n'est dupliqué dans les shaders. La même
-// formule est réimplémentée ici en JS uniquement pour dessiner les pastilles de
-// prévisualisation de l'interface.
+// La première et la dernière couleur sont identiques : la palette boucle en
+// douceur (le sampler est en mode « repeat »).
 
-export type Palette = {
-  // Nom affiché dans l'interface.
-  name: string;
-
-  // Les quatre triplets RGB de la formule cosinus.
-  a: [number, number, number];
-  b: [number, number, number];
-  c: [number, number, number];
-  d: [number, number, number];
+export type Stop = {
+  pos: number; // position dans le dégradé, 0..1
+  color: [number, number, number]; // RGB 0..255
 };
 
-// Jeu de palettes proposé. L'index dans ce tableau est ce que voit le shader.
+export type Palette = {
+  name: string;
+  stops: Stop[];
+};
+
+// Jeu de palettes. « Ice fractal » d'abord (défaut) ; les autres restent douces
+// pour éviter un rendu criard.
 export const PALETTES: Palette[] = [
   {
-    name: "Arc-en-ciel",
-    a: [0.5, 0.5, 0.5],
-    b: [0.5, 0.5, 0.5],
-    c: [1.0, 1.0, 1.0],
-    d: [0.0, 0.33, 0.67],
+    // Le dégradé fractal classique : bleu profond → blanc → or → noir.
+    name: "Ice fractal",
+    stops: [
+      { pos: 0.0, color: [0, 7, 100] },
+      { pos: 0.16, color: [32, 107, 203] },
+      { pos: 0.42, color: [237, 255, 255] },
+      { pos: 0.6425, color: [255, 170, 0] },
+      { pos: 0.8575, color: [0, 2, 0] },
+      { pos: 1.0, color: [0, 7, 100] },
+    ],
+  },
+  {
+    name: "Bleu glacé",
+    stops: [
+      { pos: 0.0, color: [8, 12, 40] },
+      { pos: 0.5, color: [70, 150, 225] },
+      { pos: 0.82, color: [220, 240, 255] },
+      { pos: 1.0, color: [8, 12, 40] },
+    ],
   },
   {
     name: "Braise",
-    a: [0.5, 0.5, 0.5],
-    b: [0.5, 0.5, 0.5],
-    c: [1.0, 1.0, 1.0],
-    d: [0.0, 0.1, 0.2],
+    stops: [
+      { pos: 0.0, color: [8, 2, 2] },
+      { pos: 0.45, color: [130, 28, 12] },
+      { pos: 0.72, color: [240, 140, 25] },
+      { pos: 0.9, color: [255, 240, 190] },
+      { pos: 1.0, color: [8, 2, 2] },
+    ],
   },
   {
-    name: "Glace",
-    a: [0.5, 0.5, 0.5],
-    b: [0.5, 0.5, 0.5],
-    c: [1.0, 1.0, 1.0],
-    d: [0.5, 0.6, 0.75],
+    name: "Forêt",
+    stops: [
+      { pos: 0.0, color: [4, 18, 10] },
+      { pos: 0.5, color: [40, 120, 60] },
+      { pos: 0.82, color: [200, 230, 150] },
+      { pos: 1.0, color: [4, 18, 10] },
+    ],
   },
   {
-    name: "Or",
-    a: [0.5, 0.5, 0.5],
-    b: [0.5, 0.5, 0.5],
-    c: [1.0, 1.0, 0.5],
-    d: [0.8, 0.9, 0.3],
+    name: "Améthyste",
+    stops: [
+      { pos: 0.0, color: [14, 6, 28] },
+      { pos: 0.5, color: [120, 60, 180] },
+      { pos: 0.85, color: [232, 214, 250] },
+      { pos: 1.0, color: [14, 6, 28] },
+    ],
   },
   {
-    name: "Coucher",
-    a: [0.5, 0.5, 0.5],
-    b: [0.5, 0.5, 0.5],
-    c: [1.0, 0.7, 0.4],
-    d: [0.0, 0.15, 0.2],
-  },
-  {
-    name: "Néon",
-    a: [0.5, 0.5, 0.5],
-    b: [0.5, 0.5, 0.5],
-    c: [2.0, 1.0, 0.0],
-    d: [0.5, 0.2, 0.25],
+    name: "Niveaux de gris",
+    stops: [
+      { pos: 0.0, color: [0, 0, 0] },
+      { pos: 0.5, color: [150, 150, 150] },
+      { pos: 0.85, color: [255, 255, 255] },
+      { pos: 1.0, color: [0, 0, 0] },
+    ],
   },
 ];
 
-// Palette par défaut au chargement.
+// Palette par défaut au chargement : « Ice fractal ».
 export const DEFAULT_PALETTE = 0;
 
-// Évalue une palette en t (même formule que les shaders) -> RGB dans [0, 255].
-// Sert à peindre les pastilles de l'interface pour qu'elles collent au rendu.
-export function paletteColor(p: Palette, t: number): [number, number, number] {
-  const channel = (i: number): number => {
-    const v = p.a[i] + p.b[i] * Math.cos(6.28318 * (p.c[i] * t + p.d[i]));
-    return Math.round(Math.max(0, Math.min(1, v)) * 255);
-  };
-  return [channel(0), channel(1), channel(2)];
+// Interpole une couleur dans une palette à la position t ∈ [0, 1].
+function sampleStops(stops: Stop[], t: number): [number, number, number] {
+  for (let k = 0; k < stops.length - 1; k++) {
+    const s0 = stops[k];
+    const s1 = stops[k + 1];
+    if (t >= s0.pos && t <= s1.pos) {
+      const span = s1.pos - s0.pos || 1;
+      const f = (t - s0.pos) / span;
+      return [
+        s0.color[0] + (s1.color[0] - s0.color[0]) * f,
+        s0.color[1] + (s1.color[1] - s0.color[1]) * f,
+        s0.color[2] + (s1.color[2] - s0.color[2]) * f,
+      ];
+    }
+  }
+  const last = stops[stops.length - 1].color;
+  return [last[0], last[1], last[2]];
 }
 
-// Construit un dégradé CSS qui échantillonne la palette (pour une pastille d'aperçu).
-export function paletteGradientCss(p: Palette, stops = 8): string {
-  const parts: string[] = [];
-  for (let i = 0; i < stops; i++) {
-    const t = i / (stops - 1);
-    const [r, g, b] = paletteColor(p, t);
-    parts.push(`rgb(${r}, ${g}, ${b}) ${Math.round(t * 100)}%`);
+// Construit la LUT RGBA (256×1) envoyée au GPU comme texture de palette.
+export function buildPaletteLut(palette: Palette, size = 256): Uint8Array {
+  const lut = new Uint8Array(size * 4);
+  for (let i = 0; i < size; i++) {
+    // i/size (et non size-1) : la palette se raccorde à elle-même en boucle.
+    const [r, g, b] = sampleStops(palette.stops, i / size);
+    lut[i * 4] = Math.round(r);
+    lut[i * 4 + 1] = Math.round(g);
+    lut[i * 4 + 2] = Math.round(b);
+    lut[i * 4 + 3] = 255;
   }
+  return lut;
+}
+
+// Dégradé CSS reproduisant la palette (pour la pastille d'aperçu de l'interface).
+export function paletteGradientCss(palette: Palette): string {
+  const parts = palette.stops.map(
+    (s) => `rgb(${s.color[0]}, ${s.color[1]}, ${s.color[2]}) ${Math.round(s.pos * 100)}%`,
+  );
   return `linear-gradient(90deg, ${parts.join(", ")})`;
 }
