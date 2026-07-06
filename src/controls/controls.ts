@@ -7,29 +7,23 @@
 import type { Viewport } from "../core/viewport";
 
 // Branche tous les écouteurs d'événements sur le canvas et la fenêtre.
-// `requestRender` est appelé chaque fois que la vue change. `onZoomBlocked` (si
-// fourni) est appelé quand un zoom ne change rien (limite atteinte) : ça évite
-// un rendu inutile tout en permettant de prévenir l'utilisateur.
+// `requestRender` est appelé quand la vue change (pan/reset). `onWheel` reçoit
+// chaque cran de molette : main pilote le zoom fluide (voir viewport.nudgeZoom).
 export function attachControls(
   canvas: HTMLCanvasElement,
   viewport: Viewport,
   requestRender: () => void,
-  onZoomBlocked?: () => void,
+  onWheel: (mouseX: number, mouseY: number, rect: DOMRect, deltaY: number) => void,
 ): void {
   let isDragging = false;
   let lastMouseX = 0;
   let lastMouseY = 0;
 
-  // Zoom molette, centré sur le curseur.
+  // Zoom molette, centré sur le curseur (délégué à main pour l'inertie).
   canvas.addEventListener("wheel", (event: WheelEvent) => {
     event.preventDefault();
     const rect = canvas.getBoundingClientRect();
-    const changed = viewport.zoomAt(event.clientX, event.clientY, rect, event.deltaY);
-    if (changed) {
-      requestRender();
-    } else if (onZoomBlocked) {
-      onZoomBlocked();
-    }
+    onWheel(event.clientX, event.clientY, rect, event.deltaY);
   });
 
   // Début du drag (bouton gauche uniquement).

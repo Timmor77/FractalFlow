@@ -69,6 +69,9 @@ let renderCount = 0;
 // fluide ; une passe pleine résolution suit dès que l'input s'arrête.
 let interacting = false;
 
+// Zoom fluide en cours : la boucle continue d'animer scale vers sa cible.
+let zooming = false;
+
 // Pendant un export PNG, le canvas est temporairement redimensionné en grand :
 // on gèle les autres rendus pour ne pas relire un canvas à la mauvaise taille.
 let capturing = false;
@@ -98,7 +101,9 @@ function render(): void {
   if (capturing) {
     return; // l'export pilote lui-même le rendu à ce moment
   }
-  renderer.resize(interacting ? interactiveScale : 1);
+  // En mouvement (interaction OU zoom inertiel) : résolution réduite ; sinon nette.
+  const moving = interacting || zooming;
+  renderer.resize(moving ? interactiveScale : 1);
   const view = buildView();
   const info = renderer.render(view);
 
@@ -139,19 +144,25 @@ function frame(now: number): void {
     const dt = now - lastFrameTime;
     if (dt > 0 && dt < 1000) {
       fps = fps > 0 ? fps * 0.8 + (1000 / dt) * 0.2 : 1000 / dt;
-      if (interacting) {
+      if (interacting || zooming) {
         adaptResolution(dt);
       }
     }
   }
   lastFrameTime = now;
 
+  // Avance le zoom inertiel : quand il a rejoint sa cible, zooming repasse à false.
+  if (zooming) {
+    zooming = viewport.advanceZoom();
+  }
+
   render();
 
-  if (interacting && !capturing) {
+  if ((interacting || zooming) && !capturing) {
     rafId = requestAnimationFrame(frame);
   } else {
     lastFrameTime = 0; // repart « à froid » à la prochaine interaction
+    updateHash(); // mémorise l'emplacement dans l'URL une fois tout stabilisé
   }
 }
 
@@ -221,7 +232,79 @@ async function saveImage(): Promise<void> {
   }
 }
 
-// --- Panneau de contrôle (palettes, carte de c, export, reset) ---
+// --- État partageable via l'URL (#...) ---
+// On encode centre (double-double hi_lo, pour rester exact en deep zoom), scale,
+// c et palette. Rechargement = même vue ; le bouton « Copier le lien » partage.
+function serializeState(): string {
+  const params = new URLSearchParams();
+  params.set("x", `${viewport.centerX.hi}_${viewport.centerX.lo}`);
+  params.set("y", `${viewport.centerY.hi}_${viewport.centerY.lo}`);
+  params.set("s", String(viewport.scale));
+  params.set("cx", String(currentC.x));
+  params.set("cy", String(currentC.y));
+  params.set("p", String(paletteIndex));
+  return params.toString();
+}
+
+function updateHash(): void {
+  // replaceState : met à jour l'URL sans empiler d'historique ni faire défiler.
+  history.replaceState(null, "", `#${serializeState()}`);
+}
+
+function loadStateFromHash(): boolean {
+  const raw = location.hash.slice(1);
+  if (!raw) {
+    return false;
+  }
+  const p = new URLSearchParams(raw);
+  const xs = (p.get("x") ?? "").split("_").map(Number);
+  const ys = (p.get("y") ?? "").split("_").map(Number);
+  const s = Number(p.get("s"));
+  if (
+    xs.length !== 2 || ys.length !== 2 ||
+    !xs.every(Number.isFinite) || !ys.every(Number.isFinite) || !Number.isFinite(s)
+  ) {
+    return false;
+  }
+  viewport.setView({ hi: xs[0], lo: xs[1] }, { hi: ys[0], lo: ys[1] }, s);
+  const cx = Number(p.get("cx"));
+  const cy = Number(p.get("cy"));
+  if (Number.isFinite(cx) && Number.isFinite(cy)) {
+    currentC.x = cx;
+    currentC.y = cy;
+  }
+  const pi = Number(p.get("p"));
+  if (Number.isFinite(pi) && pi >= 0 && pi < PALETTES.length) {
+    paletteIndex = Math.floor(pi);
+  }
+  return true;
+}
+
+async function copyLink(): Promise<void> {
+  updateHash(); // garantit que l'URL reflète la vue courante avant de copier
+  try {
+    await navigator.clipboard.writeText(location.href);
+    panel.flashCopied();
+  } catch {
+    // presse-papiers indisponible : l'URL reste de toute façon dans la barre.
+  }
+}
+
+// --- Zoom fluide : la molette déplace une cible, la boucle anime le reste ---
+function onWheel(mouseX: number, mouseY: number, rect: DOMRect, deltaY: number): void {
+  const result = viewport.nudgeZoom(mouseX, mouseY, rect, deltaY);
+  if (result === "blocked") {
+    showZoomLimit();
+    return;
+  }
+  zooming = true;
+  requestRender();
+}
+
+// Reprise éventuelle d'un emplacement depuis l'URL (avant de construire le panneau).
+const restored = loadStateFromHash();
+
+// --- Panneau de contrôle (palettes, carte de c, export, reset, lien) ---
 const panel = createControlPanel({
   initialPalette: paletteIndex,
   initialC: currentC,
@@ -240,6 +323,9 @@ const panel = createControlPanel({
   onReset: () => {
     viewport.reset();
     requestRender();
+  },
+  onCopyLink: () => {
+    void copyLink();
   },
 });
 document.body.appendChild(panel.element);
@@ -296,7 +382,7 @@ function showZoomLimit(): void {
 }
 
 // --- Câblage final ---
-attachControls(canvas, viewport, requestRender, showZoomLimit);
+attachControls(canvas, viewport, requestRender, onWheel);
 window.addEventListener("resize", requestRender);
 
 // Raccourci : S pour enregistrer l'image.
@@ -306,4 +392,9 @@ window.addEventListener("keydown", (event) => {
   }
 });
 
-runIntro();
+// Si on reprend un emplacement partagé, on l'affiche directement ; sinon intro.
+if (restored) {
+  render();
+} else {
+  runIntro();
+}

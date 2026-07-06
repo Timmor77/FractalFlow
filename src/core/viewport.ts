@@ -35,11 +35,29 @@ export class Viewport {
   // Intensité du zoom molette (formule exponentielle, souple souris/trackpad).
   private readonly wheelZoomStrength = 0.002;
 
+  // --- Zoom fluide (inertiel) ---
+  // La molette ne change pas `scale` directement : elle déplace une CIBLE, et
+  // `scale` la rejoint en douceur frame par frame (voir advanceZoom). L'ancre est
+  // le point du plan sous le curseur, gardé fixe pendant tout le mouvement.
+  private targetScale = this.initialScale;
+  private anchorFx = 0; // position normalisée du curseur (corrigée de l'aspect)
+  private anchorFy = 0;
+  private readonly zoomEase = 0.2; // fraction de l'écart rattrapée par frame
+
   // Remet la caméra à l'état initial.
   public reset(): void {
     this.centerX = ddFromNumber(this.initialCenterX);
     this.centerY = ddFromNumber(this.initialCenterY);
     this.scale = this.initialScale;
+    this.targetScale = this.initialScale;
+  }
+
+  // Restaure une vue complète (reprise d'un état depuis l'URL).
+  public setView(centerX: Dd, centerY: Dd, scale: number): void {
+    this.centerX = centerX;
+    this.centerY = centerY;
+    this.scale = Math.max(this.minScale, Math.min(this.maxScale, scale));
+    this.targetScale = this.scale;
   }
 
   // Niveau de zoom indicatif : 0 au départ, +1 par facteur 2 de zoom.
@@ -53,42 +71,60 @@ export class Viewport {
     return this.scale <= this.minScale;
   }
 
-  // Zoome autour de la souris en gardant le point complexe sous le curseur fixe.
-  //
-  // Le point sous le curseur = centre + offset, où offset = f(curseur) * scale.
-  // Pour le garder fixe, il suffit de corriger le centre par (offset_avant - offset_après).
-  // Le centre s'annule dans la différence : on n'a besoin QUE de ce petit delta
-  // float64, qu'on ajoute proprement au centre double-double.
-  // Renvoie true si la vue a réellement changé. Elle ne change pas quand on est
-  // déjà à une limite (min/max) et qu'on pousse encore dans le même sens : le
-  // caller peut alors éviter un rendu inutile (l'image serait identique).
-  public zoomAt(mouseX: number, mouseY: number, rect: DOMRect, deltaY: number): boolean {
+  // Met à jour la CIBLE de zoom autour du curseur (le zoom est ensuite animé par
+  // advanceZoom). L'ancre = point du plan sous le curseur, gardé fixe.
+  // Renvoie "blocked" si on est déjà à une borne et qu'on pousse encore dans le
+  // même sens (rien à animer, l'image serait identique).
+  public nudgeZoom(mouseX: number, mouseY: number, rect: DOMRect, deltaY: number): "zoom" | "blocked" {
     // Position du curseur, centrée sur 0 et corrigée du ratio d'aspect.
     const localX = mouseX - rect.left;
     const localY = mouseY - rect.top;
     const aspect = rect.width / rect.height;
-    const fx = (localX / rect.width - 0.5) * aspect;
-    const fy = 0.5 - localY / rect.height; // y écran vers le bas, y complexe vers le haut
-
-    const scaleBefore = this.scale;
+    this.anchorFx = (localX / rect.width - 0.5) * aspect;
+    this.anchorFy = 0.5 - localY / rect.height; // y écran vers le bas, y complexe vers le haut
 
     // deltaY < 0 => zoom in (facteur < 1), deltaY > 0 => zoom out.
-    // On borne les deltaY énormes de certains trackpads.
     const clampedDeltaY = Math.max(-120, Math.min(120, deltaY));
     const factor = Math.exp(clampedDeltaY * this.wheelZoomStrength);
 
-    this.scale = Math.max(this.minScale, Math.min(this.maxScale, this.scale * factor));
+    const before = this.targetScale;
+    this.targetScale = Math.max(this.minScale, Math.min(this.maxScale, before * factor));
 
-    // Rien n'a bougé (déjà à une borne) : on le signale pour éviter un rendu.
-    if (this.scale === scaleBefore) {
+    if (this.targetScale !== before) {
+      return "zoom";
+    }
+    // Cible inchangée : bloqué seulement si l'échelle est déjà sur la borne.
+    return this.scale <= this.minScale || this.scale >= this.maxScale ? "blocked" : "zoom";
+  }
+
+  // Avance l'animation de zoom d'une frame. Renvoie true tant que ça bouge.
+  // On interpole en espace log (perception uniforme du zoom).
+  public advanceZoom(): boolean {
+    const logCur = Math.log(this.scale);
+    const logTarget = Math.log(this.targetScale);
+    const delta = logTarget - logCur;
+
+    // Assez proche : on colle à la cible et on s'arrête.
+    if (Math.abs(delta) < 1e-4) {
+      if (this.scale !== this.targetScale) {
+        this.applyScaleAnchored(this.targetScale);
+      }
       return false;
     }
-
-    // Correction du centre = offset_avant - offset_après = f * (scaleBefore - scaleAfter).
-    const scaleDelta = scaleBefore - this.scale;
-    this.centerX = ddAddNumber(this.centerX, fx * scaleDelta);
-    this.centerY = ddAddNumber(this.centerY, fy * scaleDelta);
+    this.applyScaleAnchored(Math.exp(logCur + delta * this.zoomEase));
     return true;
+  }
+
+  // Applique une nouvelle échelle en gardant l'ancre fixe.
+  // Correction du centre = offset_avant - offset_après = ancre * (scaleAvant - scaleAprès).
+  // Le centre s'annule dans la différence : on n'ajoute qu'un petit delta float64
+  // au centre double-double.
+  private applyScaleAnchored(newScale: number): void {
+    const scaleBefore = this.scale;
+    this.scale = Math.max(this.minScale, Math.min(this.maxScale, newScale));
+    const scaleDelta = scaleBefore - this.scale;
+    this.centerX = ddAddNumber(this.centerX, this.anchorFx * scaleDelta);
+    this.centerY = ddAddNumber(this.centerY, this.anchorFy * scaleDelta);
   }
 
   // Déplacement par drag souris.

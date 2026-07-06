@@ -12,12 +12,15 @@ export type ControlPanelOptions = {
   onPickC: (cx: number, cy: number) => void;
   onSave: () => void;
   onReset: () => void;
+  onCopyLink: () => void;
 };
 
 export type ControlPanel = {
   element: HTMLElement;
   // Bascule l'état visuel du bouton d'export pendant la génération de l'image.
   setSaving(saving: boolean): void;
+  // Retour visuel bref après la copie du lien.
+  flashCopied(): void;
 };
 
 export function createControlPanel(opts: ControlPanelOptions): ControlPanel {
@@ -102,6 +105,13 @@ export function createControlPanel(opts: ControlPanelOptions): ControlPanel {
   saveButton.addEventListener("click", () => opts.onSave());
   actions.appendChild(saveButton);
 
+  const copyLabel = "Copier le lien";
+  const copyButton = document.createElement("button");
+  copyButton.className = "action-button";
+  copyButton.textContent = copyLabel;
+  copyButton.addEventListener("click", () => opts.onCopyLink());
+  actions.appendChild(copyButton);
+
   const resetButton = document.createElement("button");
   resetButton.className = "action-button";
   resetButton.innerHTML = "Réinitialiser la vue <kbd>R</kbd>";
@@ -109,6 +119,8 @@ export function createControlPanel(opts: ControlPanelOptions): ControlPanel {
   actions.appendChild(resetButton);
 
   element.appendChild(actions);
+
+  let copyTimer: number | null = null;
 
   return {
     element,
@@ -119,6 +131,16 @@ export function createControlPanel(opts: ControlPanelOptions): ControlPanel {
       } else {
         saveButton.innerHTML = saveLabel;
       }
+    },
+    flashCopied(): void {
+      copyButton.textContent = "Lien copié !";
+      if (copyTimer !== null) {
+        clearTimeout(copyTimer);
+      }
+      copyTimer = window.setTimeout(() => {
+        copyButton.textContent = copyLabel;
+        copyTimer = null;
+      }, 1400);
     },
   };
 }
