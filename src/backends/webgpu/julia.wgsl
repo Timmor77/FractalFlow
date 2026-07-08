@@ -75,7 +75,9 @@ fn fs(@builtin(position) fragCoord : vec4f) -> @location(0) vec4f {
     // Rebasing : on repart de Z[0] quand δ perd en précision (|z - Z0| < |δ|)
     // ou quand on atteint la fin de la référence. Le nouveau delta est
     // z - Z[0] (et non z), ce qui préserve l'invariant z = Z[m] + δ pour Z0 ≠ 0.
-    let Z2 = refOrbit[m];
+    // min(...) : quand la référence n'a qu'un point (elle s'échappe immédiatement),
+    // m vaut déjà refLength ici ; sans le clamp on lirait des données périmées.
+    let Z2 = refOrbit[min(m, u.refLength - 1u)];
     let fx = Z2.x + d.x - Z0.x;
     let fy = Z2.y + d.y - Z0.y;
     if ((fx * fx + fy * fy) < (d.x * d.x + d.y * d.y) || m >= u.refLength - 1u) {

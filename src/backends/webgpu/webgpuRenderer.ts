@@ -105,12 +105,22 @@ export class WebGPURenderer implements Renderer {
       throw new Error("WebGPU non supporté par ce navigateur");
     }
 
-    const adapter = await navigator.gpu.requestAdapter();
+    // Sur les portables bi-GPU, demander explicitement le GPU performant.
+    const adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance" });
     if (!adapter) {
       throw new Error("Aucun adaptateur WebGPU disponible");
     }
 
     const device = await adapter.requestDevice();
+
+    // Un device peut être perdu en cours de route (pilote, veille, TDR Windows).
+    // On ne peut pas re-créer le renderer d'ici, mais on rend la panne visible
+    // au lieu de laisser un écran figé inexpliqué.
+    device.lost.then((info) => {
+      if (info.reason !== "destroyed") {
+        console.error(`Device WebGPU perdu (${info.reason}) : ${info.message}. Recharge la page.`);
+      }
+    });
 
     const context = canvas.getContext("webgpu");
     if (!context) {

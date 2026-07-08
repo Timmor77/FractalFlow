@@ -36,6 +36,10 @@ body {
 
   /* Le canvas occupe toute la hauteur visible. */
   height: 100vh;
+
+  /* Le tactile est géré par nos Pointer Events (pan, pinch) : on désactive les
+     gestes natifs du navigateur (scroll, zoom de page) sur le canvas. */
+  touch-action: none;
 }
 
 
@@ -183,6 +187,9 @@ body {
 
 .mandelbrot-picker canvas {
   display: block;
+
+  /* Le marqueur se déplace au doigt : pas de scroll natif sur la carte. */
+  touch-action: none;
 }
 
 /* Marqueur (croix cerclée) indiquant le c courant. */
@@ -328,4 +335,21 @@ body {
 .zoom-toast.visible {
   opacity: 1;
   transform: translateX(-50%) translateY(0);
+}
+
+/* Sur petit écran (mobile), le panneau prend la largeur et l'overlay se fait
+   discret pour laisser la place à la fractale. */
+@media (max-width: 480px) {
+  .control-panel {
+    left: 12px;
+    right: 12px;
+    bottom: 12px;
+    width: auto;
+  }
+
+  #stats-overlay {
+    font-size: 11px;
+    top: 8px;
+    left: 8px;
+  }
 }

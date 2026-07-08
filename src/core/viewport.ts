@@ -71,21 +71,25 @@ export class Viewport {
     return this.scale <= this.minScale;
   }
 
-  // Met à jour la CIBLE de zoom autour du curseur (le zoom est ensuite animé par
-  // advanceZoom). L'ancre = point du plan sous le curseur, gardé fixe.
-  // Renvoie "blocked" si on est déjà à une borne et qu'on pousse encore dans le
-  // même sens (rien à animer, l'image serait identique).
+  // Met à jour la CIBLE de zoom autour du curseur à partir d'un cran de molette.
+  // deltaY < 0 => zoom in (facteur < 1), deltaY > 0 => zoom out.
   public nudgeZoom(mouseX: number, mouseY: number, rect: DOMRect, deltaY: number): "zoom" | "blocked" {
-    // Position du curseur, centrée sur 0 et corrigée du ratio d'aspect.
+    const clampedDeltaY = Math.max(-120, Math.min(120, deltaY));
+    const factor = Math.exp(clampedDeltaY * this.wheelZoomStrength);
+    return this.nudgeZoomByFactor(mouseX, mouseY, rect, factor);
+  }
+
+  // Met à jour la CIBLE de zoom autour d'un point écran (le zoom est ensuite animé
+  // par advanceZoom). L'ancre = point du plan sous le curseur (ou le milieu du
+  // pinch), gardé fixe. Renvoie "blocked" si on est déjà à une borne et qu'on
+  // pousse encore dans le même sens (rien à animer, l'image serait identique).
+  public nudgeZoomByFactor(mouseX: number, mouseY: number, rect: DOMRect, factor: number): "zoom" | "blocked" {
+    // Position du point d'ancrage, centrée sur 0 et corrigée du ratio d'aspect.
     const localX = mouseX - rect.left;
     const localY = mouseY - rect.top;
     const aspect = rect.width / rect.height;
     this.anchorFx = (localX / rect.width - 0.5) * aspect;
     this.anchorFy = 0.5 - localY / rect.height; // y écran vers le bas, y complexe vers le haut
-
-    // deltaY < 0 => zoom in (facteur < 1), deltaY > 0 => zoom out.
-    const clampedDeltaY = Math.max(-120, Math.min(120, deltaY));
-    const factor = Math.exp(clampedDeltaY * this.wheelZoomStrength);
 
     const before = this.targetScale;
     this.targetScale = Math.max(this.minScale, Math.min(this.maxScale, before * factor));

@@ -83,7 +83,12 @@ npm run dev        # open the printed localhost URL
 WebGPU is used when available (Chrome, Edge, recent Firefox/Safari); otherwise it falls
 back to WebGL2 automatically. The active backend is shown in the on-screen stats.
 
-**Controls:** mouse wheel = zoom to cursor · click-drag = pan · `R` = reset.
+**Controls:** mouse wheel = zoom to cursor · click-drag = pan · touch: one finger =
+pan, pinch = zoom · `R` = reset · `S` = save PNG.
+
+The bottom-right panel offers colour palettes, a mini-Mandelbrot map to pick the
+Julia `c` (drag the marker or type values), full-quality PNG export, and a
+**shareable link** — the view (centre, zoom, `c`, palette) lives in the URL hash.
 
 ## Run it — CUDA (NVIDIA)
 
@@ -145,10 +150,11 @@ iterations depth demands.
 
 Done: WebGL2 viewer → clean modular structure → zoom/pan/cursor-zoom → smooth colouring →
 stats → **WebGPU backend** → **WebGL2 fallback** → **perturbation deep zoom** →
-**CUDA renderer + benchmark** → **Python (mpmath) validation**.
+**CUDA renderer + benchmark** → **Python (mpmath) validation** → interactive Julia `c`
++ palette controls → PNG export → shareable URLs → inertial zoom → touch/pinch support.
 
 Next: quad-double centre for `1e-50+` zoom · Series approximation to skip early
-iterations · interactive Julia `c` and palette controls · progressive/tiled rendering.
+iterations · progressive/tiled rendering.
 
 ## Stack
 

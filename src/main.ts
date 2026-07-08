@@ -7,7 +7,7 @@
 import "./style.css";
 
 import { Viewport } from "./core/viewport";
-import { attachControls } from "./controls/controls";
+import { attachControls, shouldIgnoreShortcut } from "./controls/controls";
 import { StatsOverlay } from "./ui/stats";
 import { createControlPanel } from "./ui/panel";
 import { PALETTES, DEFAULT_PALETTE, buildPaletteLut } from "./ui/palettes";
@@ -290,15 +290,27 @@ async function copyLink(): Promise<void> {
   }
 }
 
-// --- Zoom fluide : la molette déplace une cible, la boucle anime le reste ---
-function onWheel(mouseX: number, mouseY: number, rect: DOMRect, deltaY: number): void {
-  const result = viewport.nudgeZoom(mouseX, mouseY, rect, deltaY);
+// --- Zoom fluide : molette / pinch déplacent une cible, la boucle anime le reste ---
+// Le toast « profondeur maximale » n'est montré que si on butte en zoomant VERS
+// l'avant : bloqué au dézoom max, on ne dit rien (le message serait trompeur).
+function applyZoomResult(result: "zoom" | "blocked", zoomingIn: boolean): void {
   if (result === "blocked") {
-    showZoomLimit();
+    if (zoomingIn) {
+      showZoomLimit();
+    }
     return;
   }
   zooming = true;
   requestRender();
+}
+
+function onWheel(mouseX: number, mouseY: number, rect: DOMRect, deltaY: number): void {
+  applyZoomResult(viewport.nudgeZoom(mouseX, mouseY, rect, deltaY), deltaY < 0);
+}
+
+// Pinch tactile : deux doigts qui s'écartent => facteur < 1 => zoom avant.
+function onPinch(midX: number, midY: number, rect: DOMRect, factor: number): void {
+  applyZoomResult(viewport.nudgeZoomByFactor(midX, midY, rect, factor), factor < 1);
 }
 
 // Reprise éventuelle d'un emplacement depuis l'URL (avant de construire le panneau).
@@ -382,13 +394,26 @@ function showZoomLimit(): void {
 }
 
 // --- Câblage final ---
-attachControls(canvas, viewport, requestRender, onWheel);
+attachControls(canvas, viewport, requestRender, onWheel, onPinch);
 window.addEventListener("resize", requestRender);
 
-// Raccourci : S pour enregistrer l'image.
+// Raccourci : S pour enregistrer l'image (ignoré pendant une saisie ou avec Ctrl/Alt).
 window.addEventListener("keydown", (event) => {
+  if (shouldIgnoreShortcut(event)) {
+    return;
+  }
   if (event.key === "s" || event.key === "S") {
     void saveImage();
+  }
+});
+
+// Coller un lien partagé dans la barre d'adresse (ou naviguer dans l'historique)
+// recharge la vue correspondante sans rechargement de page.
+window.addEventListener("hashchange", () => {
+  if (loadStateFromHash()) {
+    panel.setC(currentC.x, currentC.y);
+    panel.setPalette(paletteIndex);
+    requestRender();
   }
 });
 

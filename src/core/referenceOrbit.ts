@@ -49,10 +49,13 @@ export function computeReferenceOrbit(
     data[i * 2 + 1] = zy.hi + zy.lo;
     length = i + 1;
 
-    // Test d'évasion : au-delà, la référence n'a plus de sens.
+    // Test d'évasion : au-delà, la référence n'a plus de sens. On garde toujours
+    // au moins 2 points (même si Z0 s'échappe d'emblée) : le rebasing du shader
+    // lit Z[m+1] après chaque avance de δ, il lui faut donc le successeur du
+    // dernier point utilisé comme référence.
     const zxF = zx.hi + zx.lo;
     const zyF = zy.hi + zy.lo;
-    if (zxF * zxF + zyF * zyF > ESCAPE_R2) {
+    if (i > 0 && zxF * zxF + zyF * zyF > ESCAPE_R2) {
       break;
     }
 

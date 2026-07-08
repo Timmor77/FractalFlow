@@ -21,6 +21,11 @@ export type ControlPanel = {
   setSaving(saving: boolean): void;
   // Retour visuel bref après la copie du lien.
   flashCopied(): void;
+  // Synchronise l'affichage (champs + marqueur) sur un c venu de l'extérieur
+  // (ex : restauration d'un lien partagé). Ne déclenche pas onPickC.
+  setC(cx: number, cy: number): void;
+  // Synchronise la pastille de palette active. Ne déclenche pas onSelectPalette.
+  setPalette(index: number): void;
 };
 
 export function createControlPanel(opts: ControlPanelOptions): ControlPanel {
@@ -122,8 +127,18 @@ export function createControlPanel(opts: ControlPanelOptions): ControlPanel {
 
   let copyTimer: number | null = null;
 
+  const setC = (cx: number, cy: number): void => {
+    reInput.value = cx.toFixed(4);
+    imInput.value = cy.toFixed(4);
+    picker.setC(cx, cy);
+  };
+
   return {
     element,
+    setC,
+    setPalette(index: number): void {
+      swatchButtons.forEach((b, i) => b.classList.toggle("active", i === index));
+    },
     setSaving(saving: boolean): void {
       saveButton.disabled = saving;
       if (saving) {
