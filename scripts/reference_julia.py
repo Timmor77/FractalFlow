@@ -1,16 +1,17 @@
-"""Renderer Julia de référence (CPU) — vérité terrain pour valider les backends GPU.
+"""Reference Julia renderer (CPU) — ground truth for validating the GPU backends.
 
-Deux méthodes d'itération DIRECTE de z = z² + c (pas de perturbation ici : c'est
-justement l'intérêt, on valide la perturbation GPU contre un calcul indépendant) :
+Two DIRECT iteration methods for z = z² + c (no perturbation here: that is the
+whole point — the GPU perturbation is validated against an independent
+computation):
 
-  --fast   numpy float64, vectorisé, rapide. Valable en zoom modéré (jusqu'à ~1e-13).
-  (défaut) mpmath précision arbitraire. Lent mais valable à N'IMPORTE quelle profondeur.
+  --fast    numpy float64, vectorized, fast. Valid at moderate zoom (down to ~1e-13).
+  (default) mpmath arbitrary precision. Slow but valid at ANY depth.
 
-Conventions IDENTIQUES au shader (src/backends/webgpu/julia.wgsl) et au CUDA
-(cuda/julia.cu) : même mapping pixel→plan complexe, même rayon d'évasion, même
-coloration lissée. On peut donc comparer les images au pixel près.
+Conventions IDENTICAL to the shader (src/backends/webgpu/julia.wgsl) and to
+CUDA (cuda/julia.cu): same pixel→complex-plane mapping, same escape radius,
+same smooth colouring. Images can therefore be compared pixel by pixel.
 
-Exemples :
+Examples:
   uv run python scripts/reference_julia.py --w 300 --h 300 --iter 400 \
       --scale 3 --re 0 --im 0 --out artifacts/reference.png --compare artifacts/cuda_val.png
   uv run python scripts/reference_julia.py --hp --w 80 --h 80 --scale 1e-8 \
@@ -27,10 +28,10 @@ import numpy as np
 from PIL import Image
 
 
-# Coloration lissée, strictement identique aux backends GPU.
+# Smooth colouring, strictly identical to the GPU backends.
 def color(iter_count: int, mag2: float, max_iter: int) -> tuple[int, int, int]:
     if iter_count >= max_iter:
-        return (0, 0, 0)  # intérieur
+        return (0, 0, 0)  # interior
     nu = math.log2(0.5 * math.log2(mag2))
     t = (iter_count + 1.0 - nu) * 0.02
     tau = 6.2831853
@@ -41,8 +42,10 @@ def color(iter_count: int, mag2: float, max_iter: int) -> tuple[int, int, int]:
     return (clamp(r), clamp(g), clamp(b))
 
 
-# Itération directe vectorisée en float64. Rapide, valable en zoom modéré.
-def render_numpy(cx, cy, scale, jcx, jcy, max_iter, W, H) -> np.ndarray:
+# Vectorized direct iteration in float64. Fast, valid at moderate zoom.
+# Returns the raw (iteration count, |z|²) grids; colouring is separate so the
+# CPU benchmark can time the iteration alone.
+def iterate_numpy(cx, cy, scale, jcx, jcy, max_iter, W, H) -> tuple[np.ndarray, np.ndarray]:
     aspect = W / H
     ux, uy = np.meshgrid((np.arange(W) + 0.5) / W, (np.arange(H) + 0.5) / H)
     zx = cx + (ux - 0.5) * aspect * scale
@@ -64,6 +67,11 @@ def render_numpy(cx, cy, scale, jcx, jcy, max_iter, W, H) -> np.ndarray:
         zx = np.where(alive, nzx, zx)
         zy = np.where(alive, nzy, zy)
 
+    return it, mag2
+
+
+def colorize(it: np.ndarray, mag2: np.ndarray, max_iter: int) -> np.ndarray:
+    H, W = it.shape
     img = np.zeros((H, W, 3), dtype=np.uint8)
     for y in range(H):
         for x in range(W):
@@ -71,7 +79,44 @@ def render_numpy(cx, cy, scale, jcx, jcy, max_iter, W, H) -> np.ndarray:
     return img
 
 
-# Itération directe en précision arbitraire (mpmath). Lente mais valable en deep zoom.
+def render_numpy(cx, cy, scale, jcx, jcy, max_iter, W, H) -> np.ndarray:
+    it, mag2 = iterate_numpy(cx, cy, scale, jcx, jcy, max_iter, W, H)
+    return colorize(it, mag2, max_iter)
+
+
+# CPU baseline for the benchmark charts: times the vectorized float64 iteration
+# (colouring excluded) at the first schedule point of the GPU benchmarks
+# (scale 3, 300 iterations, 1920×1080). One shallow anchor point is enough to
+# show the GPU-vs-CPU gap; deep points would only add wall-clock pain.
+def run_cpu_bench(out_path: str) -> None:
+    import time
+
+    W, H, max_iter, scale = 1920, 1080, 300, 3.0
+    # Same boundary centre and c as the GPU benchmarks (see src/bench/schedule.ts).
+    cx, cy, jcx, jcy = 0.76, 0.24, -0.8, 0.156
+
+    iterate_numpy(cx, cy, scale, jcx, jcy, max_iter, W, H)  # warm-up
+    times = []
+    for _ in range(3):
+        t0 = time.perf_counter()
+        iterate_numpy(cx, cy, scale, jcx, jcy, max_iter, W, H)
+        times.append(time.perf_counter() - t0)
+    seconds = sorted(times)[1]  # median of 3
+
+    pixels = W * H
+    giter = pixels * max_iter / seconds / 1e9  # upper bound, same convention as GPU
+    mpix = pixels / seconds / 1e6
+    print(f"CPU baseline (numpy float64): {seconds * 1e3:.0f} ms, {giter:.3f} GIter/s, {mpix:.2f} Mpix/s")
+
+    os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+    with open(out_path, "w") as f:
+        f.write("# backend: numpy-f64 (vectorized direct iteration, colouring excluded)\n")
+        f.write("scale,maxIter,ms,GIterPerSec,MpixPerSec\n")
+        f.write(f"{scale:.6e},{max_iter},{seconds * 1e3:.3f},{giter:.3f},{mpix:.1f}\n")
+    print(f"CSV -> {out_path}")
+
+
+# Direct iteration in arbitrary precision (mpmath). Slow but valid in deep zoom.
 def render_mpmath(cx_str, cy_str, scale, jcx, jcy, max_iter, W, H, dps) -> np.ndarray:
     from mpmath import mp, mpf
 
@@ -100,21 +145,27 @@ def render_mpmath(cx_str, cy_str, scale, jcx, jcy, max_iter, W, H, dps) -> np.nd
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(description="Renderer Julia de référence (CPU)")
+    p = argparse.ArgumentParser(description="Reference Julia renderer (CPU)")
     p.add_argument("--w", type=int, default=300)
     p.add_argument("--h", type=int, default=300)
     p.add_argument("--iter", type=int, default=400)
     p.add_argument("--scale", type=float, default=3.0)
-    p.add_argument("--re", default="0.0", help="centre réel (chaîne, haute précision possible)")
-    p.add_argument("--im", default="0.0", help="centre imaginaire")
-    p.add_argument("--cre", type=float, default=-0.8, help="paramètre c réel")
-    p.add_argument("--cim", type=float, default=0.156, help="paramètre c imaginaire")
-    p.add_argument("--fast", action="store_true", help="numpy float64 au lieu de mpmath")
-    p.add_argument("--hp", action="store_true", help="mpmath (défaut si ni --fast ni --hp)")
-    p.add_argument("--dps", type=int, default=40, help="chiffres de précision mpmath")
+    p.add_argument("--re", default="0.0", help="real centre (string, high precision allowed)")
+    p.add_argument("--im", default="0.0", help="imaginary centre")
+    p.add_argument("--cre", type=float, default=-0.8, help="real part of c")
+    p.add_argument("--cim", type=float, default=0.156, help="imaginary part of c")
+    p.add_argument("--fast", action="store_true", help="numpy float64 instead of mpmath")
+    p.add_argument("--hp", action="store_true", help="mpmath (default if neither --fast nor --hp)")
+    p.add_argument("--dps", type=int, default=40, help="mpmath precision digits")
     p.add_argument("--out", default="artifacts/reference.png")
-    p.add_argument("--compare", default=None, help="PNG GPU à comparer (même vue)")
+    p.add_argument("--compare", default=None, help="GPU PNG to compare against (same view)")
+    p.add_argument("--bench", action="store_true",
+                   help="time the numpy iteration (CPU baseline) and write artifacts/cpu_bench.csv")
     args = p.parse_args()
+
+    if args.bench:
+        run_cpu_bench("artifacts/cpu_bench.csv")
+        return
 
     use_numpy = args.fast and not args.hp
     if use_numpy:
@@ -126,19 +177,19 @@ def main() -> None:
 
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     Image.fromarray(img, "RGB").save(args.out)
-    print(f"Référence {args.w}x{args.h} ({method}), scale={args.scale:.3e} -> {args.out}")
+    print(f"Reference {args.w}x{args.h} ({method}), scale={args.scale:.3e} -> {args.out}")
 
     if args.compare and os.path.exists(args.compare):
         gpu = np.asarray(Image.open(args.compare).convert("RGB"))
         if gpu.shape != img.shape:
-            print(f"  comparaison impossible : tailles {gpu.shape} vs {img.shape}")
+            print(f"  cannot compare: sizes {gpu.shape} vs {img.shape}")
             return
         diff = np.abs(gpu.astype(np.int32) - img.astype(np.int32))
         mean_diff = diff.mean()
-        # Fraction de pixels quasi identiques (diff <= 4 sur chaque canal).
+        # Fraction of near-identical pixels (diff <= 4 on every channel).
         close = (diff.max(axis=2) <= 4).mean() * 100.0
-        print(f"  vs {args.compare} : diff moyenne={mean_diff:.3f}/255, pixels concordants={close:.2f}%")
-        print("  " + ("PASS" if mean_diff < 3.0 else "ÉCART NOTABLE (voir bords/coloration)"))
+        print(f"  vs {args.compare}: mean diff={mean_diff:.3f}/255, matching pixels={close:.2f}%")
+        print("  " + ("PASS" if mean_diff < 3.0 else "NOTABLE MISMATCH (check edges/colouring)"))
 
 
 if __name__ == "__main__":

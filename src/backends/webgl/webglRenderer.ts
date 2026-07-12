@@ -1,17 +1,17 @@
-// Backend de rendu WebGL2 (FALLBACK).
+// WebGL2 render backend (FALLBACK).
 //
-// Utilisé uniquement quand WebGPU n'est pas disponible (Safari/iOS anciens,
-// vieux GPU). Il itère z = z² + c directement dans le fragment shader avec une
-// arithmétique "double-single" (chaque nombre = vec2(hi, lo)). Pas de
-// perturbation ici : c'est plus simple et ça marche partout, mais le zoom
-// plafonne autour de 1e-14. La version WebGPU va bien plus loin.
+// Used only when WebGPU is unavailable (older Safari/iOS, old GPUs). It
+// iterates z = z² + c directly in the fragment shader with "double-single"
+// arithmetic (each number = vec2(hi, lo)). No perturbation here: it is simpler
+// and works everywhere, but the zoom tops out around 1e-14. The WebGPU version
+// goes much deeper.
 
 import type { Renderer, ViewState, RenderInfo } from "../../core/types";
 import { ddToNumber } from "../../core/doubleDouble";
 import { canvasToPng } from "../../core/image";
 import { MAX_ITER_LIMIT, MAX_DPR } from "../../core/config";
 
-// Découpe un float64 en float32 hi + reste lo (représentation double-single).
+// Splits a float64 into float32 hi + remainder lo (double-single representation).
 function splitNumber(value: number): { high: number; low: number } {
   const high = Math.fround(value);
   return { high, low: value - high };
@@ -25,7 +25,7 @@ void main() {
 }
 `;
 
-// Fragment shader : Julia en arithmétique double-single (vec2 hi/lo).
+// Fragment shader: Julia in double-single arithmetic (vec2 hi/lo).
 const fragmentShaderSource = `#version 300 es
 precision highp float;
 
@@ -37,13 +37,13 @@ uniform vec2 u_cHigh;      // (cx.hi, cy.hi)
 uniform vec2 u_cLow;       // (cx.lo, cy.lo)
 uniform int u_maxIter;
 
-// Table de couleurs (LUT 256×1) de la palette, échantillonnée par le compte
-// d'itérations lissé. Texture en mode « repeat » -> coloration cyclique.
+// Palette colour lookup table (256×1 LUT), sampled by the smooth iteration
+// count. Texture in "repeat" mode -> cyclic colouring.
 uniform sampler2D u_lut;
 
 out vec4 outColor;
 
-// --- Primitives double-single (a = vec2(hi, lo)) ---
+// --- Double-single primitives (a = vec2(hi, lo)) ---
 vec2 twoSum(float a, float b) {
   float s = a + b;
   float bb = s - a;
@@ -54,7 +54,7 @@ vec2 quickTwoSum(float a, float b) {
   return vec2(s, b - (s - a));
 }
 vec2 splitFloat(float a) {
-  float t = 4097.0 * a; // 2^12 + 1, adapté aux mantisses 24 bits
+  float t = 4097.0 * a; // 2^12 + 1, suited to 24-bit mantissas
   float hi = t - (t - a);
   return vec2(hi, a - hi);
 }
@@ -86,7 +86,7 @@ void main() {
   vec2 p = uv - 0.5;
   p.x *= u_resolution.x / u_resolution.y;
 
-  // Offset écran -> plan complexe, en double-single.
+  // Screen offset -> complex plane, in double-single.
   vec2 offsetX = dsMulFloat(u_scaleDS, p.x);
   vec2 offsetY = dsMulFloat(u_scaleDS, p.y);
 
@@ -100,7 +100,7 @@ void main() {
   float mag2 = 0.0;
   bool escaped = false;
 
-  // Borne constante requise par WebGL2, strictement > MAX_ITER_LIMIT (TypeScript).
+  // Constant bound required by WebGL2, strictly > MAX_ITER_LIMIT (TypeScript).
   for (int i = 0; i < 4096; i++) {
     if (i >= u_maxIter) { break; }
 
@@ -122,7 +122,7 @@ void main() {
     return;
   }
 
-  // Coloration lissée, cohérente avec le backend WebGPU (échantillonne la LUT).
+  // Smooth colouring, consistent with the WebGPU backend (samples the LUT).
   float nu = log2(0.5 * log2(mag2));
   float smoothIter = float(iter) + 1.0 - nu;
   outColor = vec4(texture(u_lut, vec2(smoothIter * 0.02, 0.5)).rgb, 1.0);
@@ -132,14 +132,14 @@ void main() {
 function createShader(gl: WebGL2RenderingContext, type: number, source: string): WebGLShader {
   const shader = gl.createShader(type);
   if (!shader) {
-    throw new Error("Échec de création du shader");
+    throw new Error("Failed to create shader");
   }
   gl.shaderSource(shader, source);
   gl.compileShader(shader);
   if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
     const log = gl.getShaderInfoLog(shader);
     gl.deleteShader(shader);
-    throw new Error(`Compilation du shader échouée:\n${log}`);
+    throw new Error(`Shader compilation failed:\n${log}`);
   }
   return shader;
 }
@@ -149,7 +149,7 @@ function createProgram(gl: WebGL2RenderingContext): WebGLProgram {
   const fs = createShader(gl, gl.FRAGMENT_SHADER, fragmentShaderSource);
   const program = gl.createProgram();
   if (!program) {
-    throw new Error("Échec de création du programme WebGL");
+    throw new Error("Failed to create WebGL program");
   }
   gl.attachShader(program, vs);
   gl.attachShader(program, fs);
@@ -157,7 +157,7 @@ function createProgram(gl: WebGL2RenderingContext): WebGLProgram {
   if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
     const log = gl.getProgramInfoLog(program);
     gl.deleteProgram(program);
-    throw new Error(`Édition de liens échouée:\n${log}`);
+    throw new Error(`Program linking failed:\n${log}`);
   }
   gl.deleteShader(vs);
   gl.deleteShader(fs);
@@ -167,7 +167,7 @@ function createProgram(gl: WebGL2RenderingContext): WebGLProgram {
 function getUniform(gl: WebGL2RenderingContext, program: WebGLProgram, name: string): WebGLUniformLocation {
   const location = gl.getUniformLocation(program, name);
   if (location === null) {
-    throw new Error(`Uniform introuvable: ${name}`);
+    throw new Error(`Uniform not found: ${name}`);
   }
   return location;
 }
@@ -180,7 +180,7 @@ export class WebGLRenderer implements Renderer {
   private readonly program: WebGLProgram;
   private readonly lutTexture: WebGLTexture;
 
-  // Dernière LUT de palette uploadée : on ne ré-upload qu'au changement.
+  // Last uploaded palette LUT: we only re-upload on change.
   private lastLut: Uint8Array | null = null;
 
   private readonly u: {
@@ -197,16 +197,16 @@ export class WebGLRenderer implements Renderer {
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
 
-    // preserveDrawingBuffer : nécessaire pour que toBlob (save image) relise bien
-    // le contenu dessiné après coup. Coût négligeable pour un viewer de fractale.
+    // preserveDrawingBuffer: required so toBlob (save image) can read back the
+    // drawn content afterwards. Negligible cost for a fractal viewer.
     const gl = canvas.getContext("webgl2", { preserveDrawingBuffer: true });
     if (!gl) {
-      throw new Error("WebGL2 non supporté par ce navigateur");
+      throw new Error("WebGL2 is not supported by this browser");
     }
     this.gl = gl;
     this.program = createProgram(gl);
 
-    // Deux triangles plein écran.
+    // Two fullscreen triangles.
     const positionLocation = gl.getAttribLocation(this.program, "a_position");
     const buffer = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
@@ -231,7 +231,7 @@ export class WebGLRenderer implements Renderer {
       lut: getUniform(gl, this.program, "u_lut"),
     };
 
-    // Texture de palette (256×1) : bouclage horizontal + filtrage linéaire.
+    // Palette texture (256×1): horizontal wrap + linear filtering.
     this.lutTexture = gl.createTexture()!;
     gl.bindTexture(gl.TEXTURE_2D, this.lutTexture);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
@@ -239,9 +239,9 @@ export class WebGLRenderer implements Renderer {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
 
-    // Garde-fou : la borne du shader (4096) doit rester > au plafond d'itérations.
+    // Safety check: the shader loop bound (4096) must stay > the iteration cap.
     if (MAX_ITER_LIMIT >= 4096) {
-      throw new Error("La borne de boucle du shader WebGL2 (4096) est trop basse");
+      throw new Error("The WebGL2 shader loop bound (4096) is too low");
     }
 
     this.resize();
@@ -266,7 +266,7 @@ export class WebGLRenderer implements Renderer {
     gl.uniform2f(this.u.cLow, cRe.low, cIm.low);
     gl.uniform1i(this.u.maxIter, view.maxIter);
 
-    // Palette : upload de la LUT seulement si elle a changé, puis bind sur l'unité 0.
+    // Palette: upload the LUT only when it changed, then bind on unit 0.
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.lutTexture);
     if (view.paletteLut !== this.lastLut) {
@@ -277,6 +277,47 @@ export class WebGLRenderer implements Renderer {
     gl.drawArrays(gl.TRIANGLES, 0, 6);
 
     return { cpuMs: performance.now() - start, refLength: 0 };
+  }
+
+  // --- Benchmark harness helpers ---
+
+  // Sets an exact backing-store size, bypassing the clientWidth·DPR logic of
+  // resize(). Used to benchmark at a fixed resolution (e.g. 1920×1080).
+  public setExactSize(width: number, height: number): void {
+    this.canvas.width = width;
+    this.canvas.height = height;
+    this.gl.viewport(0, 0, width, height);
+  }
+
+  // Blocks until all submitted GL work has completed (frame timing).
+  // gl.finish() alone is not reliably blocking under ANGLE/D3D11, so a 1×1
+  // readPixels is used as well: it forces a full pipeline sync for a
+  // negligible transfer cost.
+  public finish(): void {
+    const gl = this.gl;
+    gl.finish();
+    gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, this.syncPixel);
+  }
+
+  private readonly syncPixel = new Uint8Array(4);
+
+  // Mean luma of the current framebuffer (sanity check: a silently-black
+  // output would invalidate the benchmark numbers). Forces a sync — keep it
+  // out of timed sections.
+  public sampleMeanLuma(): number {
+    const gl = this.gl;
+    const w = this.canvas.width;
+    const h = this.canvas.height;
+    const pixels = new Uint8Array(w * h * 4);
+    gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+    let sum = 0;
+    let count = 0;
+    // Sparse sampling is plenty for a mean.
+    for (let i = 0; i < pixels.length; i += 4 * 61) {
+      sum += (pixels[i] + pixels[i + 1] + pixels[i + 2]) / 3;
+      count++;
+    }
+    return count > 0 ? sum / count : 0;
   }
 
   public resize(qualityScale = 1): void {
@@ -290,9 +331,9 @@ export class WebGLRenderer implements Renderer {
     this.gl.viewport(0, 0, this.canvas.width, this.canvas.height);
   }
 
-  // Export pleine qualité : on agrandit le backing store, on dessine, on lit le
-  // PNG, puis on restaure la taille d'affichage. On borne à la taille de texture
-  // max du GPU (en gardant l'aspect) pour ne jamais échouer silencieusement.
+  // Full-quality export: grow the backing store, draw, read the PNG, then
+  // restore the display size. Clamped to the GPU's max texture size (keeping
+  // aspect) so it can never fail silently.
   public async capture(view: ViewState, width: number, height: number): Promise<Blob> {
     const max = this.gl.getParameter(this.gl.MAX_TEXTURE_SIZE) as number;
     const scale = Math.min(1, max / Math.max(width, height));
@@ -304,7 +345,7 @@ export class WebGLRenderer implements Renderer {
     this.render(view);
     const blob = await canvasToPng(this.canvas);
     this.resize();
-    this.render(view); // laisse une frame nette à l'écran après l'export
+    this.render(view); // leave a sharp frame on screen after the export
     return blob;
   }
 }

@@ -1,19 +1,19 @@
-// FractalFlow — renderer Julia CUDA par PERTURBATION (version native hyper-optimisée).
+// FractalFlow — CUDA Julia renderer using PERTURBATION (native, heavily optimized).
 //
-// Même algorithme que le backend WebGPU (voir src/backends/webgpu/julia.wgsl),
-// mais natif et massivement parallèle :
-//   - l'orbite de référence est calculée sur l'HÔTE en double-double (haute
-//     précision), ce qui positionne correctement la référence en deep zoom ;
-//   - chaque pixel suit son delta δ sur le GPU en double (plus précis que le f32
-//     du navigateur, donc images plus propres et zoom plus profond) ;
-//   - rebasing de Zhuoran pour gérer les glitches et prolonger la référence.
+// Same algorithm as the WebGPU backend (see src/backends/webgpu/julia.wgsl),
+// but native and massively parallel:
+//   - the reference orbit is computed on the HOST in double-double (high
+//     precision), which positions the reference correctly in deep zoom;
+//   - each pixel tracks its delta δ on the GPU in double (more precise than
+//     the browser's f32, hence cleaner images and deeper zoom);
+//   - Zhuoran rebasing to handle glitches and stretch the reference.
 //
-// Deux modes :
-//   (défaut)  rend une image PNG pour une vue donnée ;
-//   --bench   mesure le débit (GIter/s, Mpix/s) à des profondeurs de zoom croissantes.
+// Two modes:
+//   (default) renders a PNG image for a given view;
+//   --bench   measures throughput (GIter/s, Mpix/s) at increasing zoom depths.
 //
-// Build :  nvcc -O3 julia.cu -o julia
-// Exemple : ./julia --scale 3.0 --iter 500 --w 1600 --h 1600 --out ../artifacts/cuda.png
+// Build:   nvcc -O3 julia.cu -o julia
+// Example: ./julia --scale 3.0 --iter 500 --w 1600 --h 1600 --out ../artifacts/cuda.png
 
 #include <cstdio>
 #include <cstdlib>
@@ -24,20 +24,20 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
 
-// Vérifie le code de retour d'un appel CUDA et s'arrête proprement en cas d'erreur.
+// Checks the return code of a CUDA call and exits cleanly on error.
 #define CUDA_CHECK(call)                                                        \
   do {                                                                          \
     cudaError_t err = (call);                                                   \
     if (err != cudaSuccess) {                                                   \
-      fprintf(stderr, "Erreur CUDA %s:%d: %s\n", __FILE__, __LINE__,            \
+      fprintf(stderr, "CUDA error %s:%d: %s\n", __FILE__, __LINE__,             \
               cudaGetErrorString(err));                                         \
       exit(1);                                                                  \
     }                                                                           \
   } while (0)
 
 // ============================================================================
-// Arithmétique double-double sur l'hôte (précision de l'orbite de référence).
-// Identique en esprit à src/core/doubleDouble.ts.
+// Host-side double-double arithmetic (reference orbit precision).
+// Same spirit as src/core/doubleDouble.ts.
 // ============================================================================
 
 struct dd {
@@ -75,7 +75,7 @@ static inline dd dd_mul(dd a, dd b) {
   return quick_two_sum(p.hi, p.lo + (a.hi * b.lo + a.lo * b.hi));
 }
 static inline dd dd_div(dd a, dd b) {
-  // Division par correction de Newton (deux passes suffisent pour la précision DD).
+  // Division via Newton correction (two passes suffice for DD precision).
   double q1 = a.hi / b.hi;
   dd r = dd_sub(a, dd_mul(b, dd_from(q1)));
   double q2 = r.hi / b.hi;
@@ -85,10 +85,10 @@ static inline dd dd_div(dd a, dd b) {
   return dd_addd(q, q3);
 }
 
-// Convertit une chaîne décimale (potentiellement à beaucoup de chiffres) en DD.
-// Méthode exacte : on accumule TOUS les chiffres comme un entier en DD, puis on
-// divise une seule fois par 10^(nombre de décimales). Évite l'erreur qu'on aurait
-// en multipliant répétitivement par 0.1 (non représentable).
+// Converts a decimal string (possibly with many digits) into a DD.
+// Exact method: accumulate ALL the digits as a DD integer, then divide once by
+// 10^(number of decimals). Avoids the error of repeatedly multiplying by 0.1
+// (which is not representable).
 static dd dd_from_string(const char* s) {
   int i = 0;
   bool neg = false;
@@ -114,8 +114,8 @@ static dd dd_from_string(const char* s) {
 }
 
 // ============================================================================
-// Orbite de référence (hôte, DD). Identique à src/core/referenceOrbit.ts.
-// Sortie : Zx[], Zy[] en double ; renvoie le nombre de points valides.
+// Reference orbit (host, DD). Same as src/core/referenceOrbit.ts.
+// Output: Zx[], Zy[] as double; returns the number of valid points.
 // ============================================================================
 
 static int computeReference(dd cx0, dd cy0, double jcx, double jcy, int maxIter,
@@ -143,7 +143,7 @@ static int computeReference(dd cx0, dd cy0, double jcx, double jcy, int maxIter,
 }
 
 // ============================================================================
-// Kernel device : perturbation en double + rebasing. Un thread par pixel.
+// Device kernel: perturbation in double + rebasing. One thread per pixel.
 // ============================================================================
 
 __device__ static float3 palette(float t) {
@@ -160,13 +160,13 @@ __global__ static void renderKernel(unsigned char* out, int W, int H,
   int y = blockIdx.y * blockDim.y + threadIdx.y;
   if (x >= W || y >= H) return;
 
-  // δ initial = offset du pixel par rapport au centre. y image (haut->bas) inversé.
+  // Initial δ = pixel offset from the centre. Image y (top->bottom) inverted.
   double uvx = (x + 0.5) / W;
   double uvy = (y + 0.5) / H;
   double dx = (uvx - 0.5) * aspect * scale;
   double dy = (0.5 - uvy) * scale;
 
-  double Z0x = Zx[0], Z0y = Zy[0];  // départ de la référence (= centre de la vue)
+  double Z0x = Zx[0], Z0y = Zy[0];  // reference start (= view centre)
   int m = 0, iter = 0;
   bool escaped = false;
   double zx = 0.0, zy = 0.0, mag2 = 0.0;
@@ -186,8 +186,9 @@ __global__ static void renderKernel(unsigned char* out, int W, int H,
     m++;
     iter++;
 
-    // Rebasing : on repart de Z[0] quand |z - Z0| < |δ| ou en fin de référence.
-    // Le nouveau delta est z - Z[0] (préserve l'invariant z = Z[m] + δ si Z0 ≠ 0).
+    // Rebasing: restart from Z[0] when |z - Z0| < |δ| or at the end of the
+    // reference. The new delta is z - Z[0] (preserves the invariant
+    // z = Z[m] + δ when Z0 ≠ 0).
     double fx = Zx[m] + dx - Z0x, fy = Zy[m] + dy - Z0y;
     if ((fx * fx + fy * fy) < (dx * dx + dy * dy) || m >= refLen - 1) {
       dx = fx;
@@ -202,7 +203,7 @@ __global__ static void renderKernel(unsigned char* out, int W, int H,
     return;
   }
 
-  // Coloration lissée, identique aux backends navigateur.
+  // Smooth colouring, identical to the browser backends.
   float nu = log2f(0.5f * log2f((float)mag2));
   float t = ((float)iter + 1.0f - nu) * 0.02f;
   float3 c = palette(t);
@@ -212,10 +213,10 @@ __global__ static void renderKernel(unsigned char* out, int W, int H,
 }
 
 // ============================================================================
-// Orchestration hôte.
+// Host orchestration.
 // ============================================================================
 
-// Rend une vue et renvoie le temps GPU (ms). Alloue/écrit selon les tailles données.
+// Renders one view and returns the GPU time (ms). Uses the provided buffers.
 static float renderView(unsigned char* dOut, int W, int H, dd cx, dd cy,
                         double jcx, double jcy, double scale, int maxIter,
                         double* hZx, double* hZy, double* dZx, double* dZy) {
@@ -257,13 +258,13 @@ static bool argFlag(int argc, char** argv, const char* key) {
   return false;
 }
 
-// Mode benchmark : débit à des profondeurs croissantes. Écrit un CSV.
+// Benchmark mode: throughput at increasing depths. Writes a CSV.
 static void runBenchmark(int argc, char** argv) {
   int W = (int)argNum(argc, argv, "--w", 1920);
   int H = (int)argNum(argc, argv, "--h", 1080);
   double jcx = argNum(argc, argv, "--cre", -0.8);
   double jcy = argNum(argc, argv, "--cim", 0.156);
-  // Centre de bord pour avoir des orbites longues (cas réaliste de deep zoom).
+  // Boundary centre for long orbits (realistic deep-zoom scenario).
   dd cx = dd_from_string(argStr(argc, argv, "--re", "0.76"));
   dd cy = dd_from_string(argStr(argc, argv, "--im", "0.24"));
 
@@ -284,8 +285,11 @@ static void runBenchmark(int argc, char** argv) {
 
   double scale = 3.0;
   for (int level = 0; level <= 24; level += 2) {
-    int maxIter = 300 + level * 400;  // plus on zoome, plus il faut d'itérations
-    // Chauffe (compil JIT, caches) puis mesure la moyenne de 3 rendus.
+    int maxIter = 300 + level * 400;  // deeper zoom needs more iterations
+    // Cap at the browser's MAX_ITER_LIMIT (see src/bench/schedule.ts) so the
+    // per-pixel work — hence Mpix/s — stays comparable across backends.
+    if (maxIter > 4000) maxIter = 4000;
+    // Warm-up (JIT compile, caches) then measure the mean of 3 renders.
     renderView(dOut, W, H, cx, cy, jcx, jcy, scale, maxIter, hZx, hZy, dZx, dZy);
     float ms = 0.0f;
     for (int r = 0; r < 3; r++)
@@ -293,12 +297,12 @@ static void runBenchmark(int argc, char** argv) {
     ms /= 3.0f;
 
     double pixels = (double)W * H;
-    double giter = (pixels * maxIter) / (ms * 1e-3) / 1e9;  // borne haute (itérations max)
+    double giter = (pixels * maxIter) / (ms * 1e-3) / 1e9;  // upper bound (max iterations)
     double mpix = pixels / (ms * 1e-3) / 1e6;
     printf("%-12.2e %8d %9.2f %11.2f %11.1f\n", scale, maxIter, ms, giter, mpix);
     if (csv) fprintf(csv, "%.6e,%d,%.3f,%.3f,%.1f\n", scale, maxIter, ms, giter, mpix);
 
-    scale *= 0.1;  // un cran plus profond
+    scale *= 0.1;  // one step deeper
   }
 
   if (csv) { fclose(csv); printf("CSV -> %s\n", csvPath); }
@@ -306,7 +310,7 @@ static void runBenchmark(int argc, char** argv) {
   cudaFree(dZx); cudaFree(dZy); cudaFree(dOut);
 }
 
-// Mode rendu : une image PNG.
+// Render mode: one PNG image.
 static void runRender(int argc, char** argv) {
   int W = (int)argNum(argc, argv, "--w", 1600);
   int H = (int)argNum(argc, argv, "--h", 1600);
@@ -332,7 +336,7 @@ static void runRender(int argc, char** argv) {
   CUDA_CHECK(cudaMemcpy(hOut, dOut, (size_t)W * H * 3, cudaMemcpyDeviceToHost));
   stbi_write_png(out, W, H, 3, hOut, W * 3);
 
-  printf("Rendu %dx%d, scale=%.3e, iter=%d en %.2f ms -> %s\n", W, H, scale, maxIter, ms, out);
+  printf("Rendered %dx%d, scale=%.3e, iter=%d in %.2f ms -> %s\n", W, H, scale, maxIter, ms, out);
 
   free(hZx); free(hZy); free(hOut);
   cudaFree(dZx); cudaFree(dZy); cudaFree(dOut);
