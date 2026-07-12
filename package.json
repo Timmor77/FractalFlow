@@ -3,7 +3,7 @@
   "private": true,
   "version": "1.0.0",
   "description": "Deep-zoom Julia set explorer — one perturbation-theory algorithm rendered in WebGPU, WebGL2 and CUDA",
-  "license": "MIT",
+  "license": "CC-BY-NC-SA-4.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Timmor77/FractalFlow.git"

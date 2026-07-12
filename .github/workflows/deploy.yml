@@ -29,7 +29,11 @@ jobs:
       - run: npm ci
       # Base path is passed here only, so local dev/preview keep serving at /.
       - run: npx tsc && npx vite build --base=/FractalFlow/
+      # enablement: true auto-creates the Pages site on first run, so the
+      # workflow works without manually enabling Pages in repo settings.
       - uses: actions/configure-pages@v5
+        with:
+          enablement: true
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist

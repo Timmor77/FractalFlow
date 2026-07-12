@@ -1,7 +1,7 @@
 # FractalFlow
 
 [![CI](https://github.com/Timmor77/FractalFlow/actions/workflows/ci.yml/badge.svg)](https://github.com/Timmor77/FractalFlow/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![License: CC BY-NC-SA 4.0](https://img.shields.io/badge/License-CC_BY--NC--SA_4.0-blue.svg)](LICENSE)
 ![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6)
 ![WebGPU](https://img.shields.io/badge/WebGPU-WGSL-orange)
 ![CUDA](https://img.shields.io/badge/CUDA-C%2B%2B-76b900)
@@ -253,4 +253,7 @@ TypeScript · Vite · WebGPU (WGSL) · WebGL2 (GLSL) · CUDA C · Python + `uv`
 
 ## License
 
-[MIT](LICENSE)
+[CC BY-NC-SA 4.0](LICENSE) — free to use, modify and share for
+non-commercial purposes, as long as derivatives keep the same license and
+credit the original. `cuda/stb_image_write.h` remains public domain
+(nothings/stb).
