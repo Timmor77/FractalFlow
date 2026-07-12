@@ -13,7 +13,11 @@ pixel-for-pixel against an arbitrary-precision reference.
 **[▶ Live demo](https://timmor77.github.io/FractalFlow/)** — WebGPU in Chrome/Edge,
 automatic WebGL2 fallback elsewhere.
 
-![Continuous deep zoom into the Julia set (×10⁹, rendered by the CUDA backend)](docs/zoom.gif)
+<p align="center">
+  <!-- Native width (matches make_zoom_gif.py --width): browser upscaling would blur it. -->
+  <img src="docs/zoom.gif" width="640"
+       alt="Continuous deep zoom into the Julia set (×10⁹, rendered by the CUDA backend)">
+</p>
 
 ## Highlights
 
@@ -74,9 +78,12 @@ The high-precision centre is stored as a **double-double** value (two `float64`s
 the second holds the rounding error of the first), which is what lets the browser reach
 ~`1e-28` zoom.
 
-![In-browser render at ×1,000,000 zoom near a repelling fixed point of z²+c](docs/deep-zoom.jpg)
+<p align="center">
+  <img src="docs/deep-zoom.jpg" width="620"
+       alt="In-browser render at ×1,000,000 zoom near a repelling fixed point of z²+c">
+</p>
 
-*Rendered in the browser at ×10⁶ zoom, centred near a repelling fixed point of
+*Rendered in the browser at ×10⁶ zoom, centred on a repelling fixed point of
 `z² + c` — a point that provably lies on the Julia set, so there is structure at
 every depth.*
 

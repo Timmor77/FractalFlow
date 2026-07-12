@@ -146,11 +146,25 @@ static int computeReference(dd cx0, dd cy0, double jcx, double jcy, int maxIter,
 // Device kernel: perturbation in double + rebasing. One thread per pixel.
 // ============================================================================
 
+// "Ice fractal" gradient (deep blue -> white -> gold -> black), same stops as
+// the browser's default palette (src/ui/palettes.ts) so all three backends
+// colour a given view identically. t wraps like the browser's repeat sampler.
 __device__ static float3 palette(float t) {
-  const float TAU = 6.2831853f;
-  return make_float3(0.5f + 0.5f * cosf(TAU * (0.00f + t)),
-                     0.5f + 0.5f * cosf(TAU * (0.33f + t)),
-                     0.5f + 0.5f * cosf(TAU * (0.67f + t)));
+  const float pos[6] = {0.0f, 0.16f, 0.42f, 0.6425f, 0.8575f, 1.0f};
+  const float col[6][3] = {
+      {0, 7, 100}, {32, 107, 203}, {237, 255, 255},
+      {255, 170, 0}, {0, 2, 0}, {0, 7, 100},
+  };
+  t = t - floorf(t);
+  for (int k = 0; k < 5; k++) {
+    if (t <= pos[k + 1]) {
+      float f = (t - pos[k]) / (pos[k + 1] - pos[k]);
+      return make_float3((col[k][0] + (col[k + 1][0] - col[k][0]) * f) / 255.0f,
+                         (col[k][1] + (col[k + 1][1] - col[k][1]) * f) / 255.0f,
+                         (col[k][2] + (col[k + 1][2] - col[k][2]) * f) / 255.0f);
+    }
+  }
+  return make_float3(0.0f, 7.0f / 255.0f, 100.0f / 255.0f);
 }
 
 __global__ static void renderKernel(unsigned char* out, int W, int H,
