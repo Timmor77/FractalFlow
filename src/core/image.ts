@@ -1,6 +1,6 @@
-// Petit utilitaire partagé par les backends : lire le contenu d'un canvas en PNG.
-// Sert au « save image » (export pleine qualité). Sans dépendance à un backend
-// particulier : les deux renderers dessinent dans un canvas, puis appellent ceci.
+// Small utility shared by the backends: read a canvas's content as a PNG.
+// Used by "save image" (full-quality export). No dependency on any particular
+// backend: both renderers draw into a canvas, then call this.
 
 export function canvasToPng(canvas: HTMLCanvasElement): Promise<Blob> {
   return new Promise((resolve, reject) => {
@@ -8,7 +8,7 @@ export function canvasToPng(canvas: HTMLCanvasElement): Promise<Blob> {
       if (blob) {
         resolve(blob);
       } else {
-        reject(new Error("Export PNG échoué (toBlob a renvoyé null)"));
+        reject(new Error("PNG export failed (toBlob returned null)"));
       }
     }, "image/png");
   });

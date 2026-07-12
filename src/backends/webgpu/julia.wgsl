@@ -1,36 +1,36 @@
-// Shader de rendu Julia par PERTURBATION (WebGPU / WGSL).
+// Julia render shader using PERTURBATION (WebGPU / WGSL).
 //
-// Chaque pixel ne calcule pas z = z² + c directement. Il suit un petit écart δ
-// (delta) par rapport à l'orbite de référence pré-calculée sur le CPU (voir
-// referenceOrbit.ts). Tout est en f32 : c'est simple et rapide, et c'est la
-// haute précision de la référence (côté CPU) qui débloque le deep zoom.
+// Each pixel does not compute z = z² + c directly. It tracks a small offset δ
+// (delta) from the reference orbit precomputed on the CPU (see
+// referenceOrbit.ts). Everything is f32: simple and fast — it is the high
+// precision of the reference (CPU side) that unlocks deep zoom.
 //
-// Récurrence (Julia, c constant, donc pas de terme δc) :
+// Recurrence (Julia, c constant, hence no δc term):
 //   z_n = Z[m] + δ
 //   δ'  = 2·Z[m]·δ + δ²
-// Rebasing de Zhuoran : quand |z| devient plus petit que |δ|, ou qu'on atteint
-// la fin de la référence, on repart de Z[0] avec δ = z. Ça évite les artefacts
-// et prolonge une référence unique très profondément.
+// Zhuoran rebasing: when |z| becomes smaller than |δ|, or the reference runs
+// out, restart from Z[0] with δ = z. This avoids glitches and stretches a
+// single reference very deep.
 
 struct Uniforms {
   resolution : vec2f,
-  scale : f32,      // taille verticale de la vue dans le plan complexe
-  aspect : f32,     // largeur / hauteur
+  scale : f32,      // vertical size of the view in the complex plane
+  aspect : f32,     // width / height
   maxIter : u32,
-  refLength : u32,  // nombre de points valides dans l'orbite de référence
+  refLength : u32,  // number of valid points in the reference orbit
 };
 
 @group(0) @binding(0) var<uniform> u : Uniforms;
 
-// Orbite de référence : [Zx0, Zy0, Zx1, Zy1, ...] vue comme un tableau de vec2f.
+// Reference orbit: [Zx0, Zy0, Zx1, Zy1, ...] viewed as an array of vec2f.
 @group(0) @binding(1) var<storage, read> refOrbit : array<vec2f>;
 
-// Palette sous forme de table de couleurs (LUT 256×1) construite par le CPU
-// (ui/palettes.ts). Sampler en mode « repeat » -> coloration cyclique et douce.
+// Palette as a colour lookup table (256×1 LUT) built on the CPU
+// (ui/palettes.ts). Sampler in "repeat" mode -> smooth cyclic colouring.
 @group(0) @binding(2) var paletteLut : texture_2d<f32>;
 @group(0) @binding(3) var paletteSampler : sampler;
 
-// Triangle plein écran généré à partir de l'index de sommet (aucun buffer requis).
+// Fullscreen triangle generated from the vertex index (no buffer needed).
 @vertex
 fn vs(@builtin(vertex_index) vi : u32) -> @builtin(position) vec4f {
   var pts = array<vec2f, 3>(vec2f(-1.0, -1.0), vec2f(3.0, -1.0), vec2f(-1.0, 3.0));
@@ -39,19 +39,19 @@ fn vs(@builtin(vertex_index) vi : u32) -> @builtin(position) vec4f {
 
 @fragment
 fn fs(@builtin(position) fragCoord : vec4f) -> @location(0) vec4f {
-  // Position du pixel en 0..1, centrée, corrigée de l'aspect. y écran -> y complexe.
+  // Pixel position in 0..1, centred, aspect-corrected. Screen y -> complex y.
   let uv = fragCoord.xy / u.resolution;
   var p = uv - vec2f(0.5, 0.5);
   p.x = p.x * u.aspect;
   p.y = -p.y;
 
-  // δ initial = offset du pixel par rapport au centre = p * scale.
-  // Même à très fort zoom (scale ~1e-28), cette petite valeur reste représentable en f32.
+  // Initial δ = pixel offset from the centre = p * scale.
+  // Even at extreme zoom (scale ~1e-28), this small value stays representable in f32.
   var d = p * u.scale;
 
-  let Z0 = refOrbit[0];      // point de départ de la référence (= centre de la vue)
-  var m : u32 = 0u;          // index dans l'orbite de référence
-  var iter : u32 = 0u;       // itération courante
+  let Z0 = refOrbit[0];      // reference starting point (= view centre)
+  var m : u32 = 0u;          // index into the reference orbit
+  var iter : u32 = 0u;       // current iteration
   var escaped = false;
   var zx = 0.0;
   var zy = 0.0;
@@ -72,11 +72,11 @@ fn fs(@builtin(position) fragCoord : vec4f) -> @location(0) vec4f {
     m = m + 1u;
     iter = iter + 1u;
 
-    // Rebasing : on repart de Z[0] quand δ perd en précision (|z - Z0| < |δ|)
-    // ou quand on atteint la fin de la référence. Le nouveau delta est
-    // z - Z[0] (et non z), ce qui préserve l'invariant z = Z[m] + δ pour Z0 ≠ 0.
-    // min(...) : quand la référence n'a qu'un point (elle s'échappe immédiatement),
-    // m vaut déjà refLength ici ; sans le clamp on lirait des données périmées.
+    // Rebasing: restart from Z[0] when δ loses precision (|z - Z0| < |δ|) or
+    // when the reference runs out. The new delta is z - Z[0] (not z), which
+    // preserves the invariant z = Z[m] + δ when Z0 ≠ 0.
+    // min(...): when the reference has a single point (it escapes immediately),
+    // m already equals refLength here; without the clamp we would read stale data.
     let Z2 = refOrbit[min(m, u.refLength - 1u)];
     let fx = Z2.x + d.x - Z0.x;
     let fy = Z2.y + d.y - Z0.y;
@@ -86,17 +86,17 @@ fn fs(@builtin(position) fragCoord : vec4f) -> @location(0) vec4f {
     }
   }
 
-  // Point à l'intérieur de l'ensemble : noir.
+  // Point inside the set: black.
   if (!escaped) {
     return vec4f(0.0, 0.0, 0.0, 1.0);
   }
 
-  // Coloration lissée (smooth iteration count) : évite les bandes discrètes.
-  // NB : `smooth` est un mot réservé WGSL, on nomme la variable smoothIter.
+  // Smooth colouring (smooth iteration count): avoids discrete bands.
+  // NB: `smooth` is a reserved WGSL word, hence the name smoothIter.
   let mag2 = zx * zx + zy * zy;
   let nu = log2(0.5 * log2(mag2));           // log2(log2(|z|))
   let smoothIter = f32(iter) + 1.0 - nu;
-  // Échantillonne la LUT ; le sampler « repeat » fait cycler la palette.
+  // Sample the LUT; the "repeat" sampler makes the palette cycle.
   let t = smoothIter * 0.02;
   let rgb = textureSampleLevel(paletteLut, paletteSampler, vec2f(t, 0.5), 0.0).rgb;
   return vec4f(rgb, 1.0);

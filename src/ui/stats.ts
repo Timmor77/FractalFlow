@@ -1,36 +1,36 @@
-// Overlay de statistiques affiché en haut à gauche.
-// Purement informatif : backend actif, temps de rendu, position, zoom.
+// Stats overlay shown in the top-left corner.
+// Purely informative: active backend, render time, position, zoom.
 
 export type StatsData = {
-  // Backend de rendu actif ("WebGPU" ou "WebGL2").
+  // Active render backend ("WebGPU" or "WebGL2").
   backend: string;
 
-  // Nombre total de rendus effectués.
+  // Total number of renders performed.
   renderCount: number;
 
-  // Temps CPU du dernier rendu, en millisecondes.
+  // CPU time of the last render, in milliseconds.
   lastRenderMs: number;
 
-  // Images par seconde (moyenne glissante), 0 tant qu'inconnu.
+  // Frames per second (rolling average), 0 while unknown.
   fps: number;
 
-  // Longueur de l'orbite de référence (perturbation). 0 pour WebGL2.
+  // Reference orbit length (perturbation). 0 for WebGL2.
   refLength: number;
 
-  // Centre de la caméra (approché en float64 pour l'affichage).
+  // Camera centre (float64 approximation, for display).
   centerX: number;
   centerY: number;
 
-  // Taille verticale visible dans le plan complexe.
+  // Vertical size visible in the complex plane.
   scale: number;
 
-  // Niveau de zoom indicatif (1 niveau = ×2).
+  // Indicative zoom level (1 level = ×2).
   zoomLevel: number;
 
-  // Itérations envoyées au rendu.
+  // Iterations sent to the renderer.
   maxIter: number;
 
-  // Vrai quand la profondeur maximale est atteinte (limite de précision).
+  // True when the maximum depth is reached (precision limit).
   atMaxDepth: boolean;
 };
 
@@ -44,13 +44,13 @@ export class StatsOverlay {
   }
 
   public update(data: StatsData): void {
-    // La ligne "ref orbit" n'a de sens que pour la perturbation (WebGPU).
+    // The "ref orbit" line only makes sense for perturbation (WebGPU).
     const refLine =
       data.refLength > 0 ? `<div>ref orbit: ${data.refLength}</div>` : "";
 
     const fpsLine = data.fps > 0 ? `<div>fps: ${data.fps.toFixed(0)}</div>` : "";
     const limitLine = data.atMaxDepth
-      ? `<div class="stats-limit">⚠ profondeur maximale atteinte</div>`
+      ? `<div class="stats-limit">⚠ maximum depth reached</div>`
       : "";
 
     this.element.innerHTML = `

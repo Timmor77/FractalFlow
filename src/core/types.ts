@@ -1,59 +1,59 @@
-// Types partagés entre le cœur (caméra, math) et les backends de rendu.
-// Le but : un backend (WebGPU, WebGL2) ne dépend que de ces types, jamais de
-// l'autre backend ni des détails de la caméra.
+// Types shared between the core (camera, math) and the render backends.
+// Goal: a backend (WebGPU, WebGL2) only depends on these types, never on the
+// other backend nor on camera internals.
 
 import type { Dd } from "./doubleDouble";
 
-// Instantané de la caméra + paramètres pour UNE frame.
-// C'est de la donnée pure : chaque backend en dérive ce dont il a besoin
-// (WebGPU calcule une orbite de référence, WebGL2 découpe le centre en hi/lo).
+// Snapshot of the camera + parameters for ONE frame.
+// Pure data: each backend derives what it needs from it (WebGPU computes a
+// reference orbit, WebGL2 splits the centre into hi/lo).
 export type ViewState = {
-  // Centre de la vue dans le plan complexe, en double-double (deep zoom).
+  // View centre in the complex plane, as double-double (deep zoom).
   centerX: Dd;
   centerY: Dd;
 
-  // Taille verticale visible dans le plan complexe (float64).
-  // Plus scale est petit, plus on est zoomé.
+  // Vertical size visible in the complex plane (float64).
+  // The smaller the scale, the deeper the zoom.
   scale: number;
 
-  // Paramètre c de l'ensemble de Julia (constant pour toute l'image).
+  // c parameter of the Julia set (constant across the whole image).
   cx: number;
   cy: number;
 
-  // Nombre maximum d'itérations pour cette frame.
+  // Maximum iteration count for this frame.
   maxIter: number;
 
-  // Table de couleurs (LUT RGBA 256×1) construite par main.ts depuis la palette
-  // choisie. Le backend l'upload en texture ; la référence ne change qu'au
-  // changement de palette (upload paresseux).
+  // Colour lookup table (256×1 RGBA LUT) built by main.ts from the selected
+  // palette. The backend uploads it as a texture; the reference only changes
+  // when the palette changes (lazy upload).
   paletteLut: Uint8Array;
 };
 
-// Ce qu'un rendu renvoie, pour l'overlay de statistiques.
+// What a render returns, for the stats overlay.
 export type RenderInfo = {
-  // Temps CPU passé à préparer/soumettre la frame, en millisecondes.
+  // CPU time spent preparing/submitting the frame, in milliseconds.
   cpuMs: number;
 
-  // Longueur d'orbite de référence réellement utilisée.
-  // 0 si le backend n'utilise pas la perturbation (ex : WebGL2 fallback).
+  // Reference orbit length actually used.
+  // 0 if the backend does not use perturbation (e.g. WebGL2 fallback).
   refLength: number;
 };
 
-// Interface commune à tous les backends de rendu.
-// main.ts choisit une implémentation et ne parle qu'à cette interface.
+// Interface common to all render backends.
+// main.ts picks an implementation and only talks to this interface.
 export interface Renderer {
-  // Nom lisible affiché dans l'overlay (ex : "WebGPU", "WebGL2").
+  // Human-readable name shown in the overlay (e.g. "WebGPU", "WebGL2").
   readonly name: string;
 
-  // Dessine une frame pour l'état de vue donné.
+  // Draws one frame for the given view state.
   render(view: ViewState): RenderInfo;
 
-  // Réajuste la taille interne du canvas. qualityScale < 1 réduit la résolution
-  // (rendu rapide pendant l'interaction) ; 1 = pleine résolution.
+  // Adjusts the canvas's internal size. qualityScale < 1 reduces resolution
+  // (fast render during interaction); 1 = full resolution.
   resize(qualityScale?: number): void;
 
-  // Rend la vue hors écran à la taille demandée (pleine qualité) et renvoie
-  // l'image en PNG. Sert au « save image » : on peut viser bien plus grand que
-  // l'écran. Le canvas est restauré à sa taille d'affichage juste après.
+  // Renders the view off-screen at the requested size (full quality) and
+  // returns the image as PNG. Used by "save image": we can target much larger
+  // than the screen. The canvas is restored to its display size right after.
   capture(view: ViewState, width: number, height: number): Promise<Blob>;
 }

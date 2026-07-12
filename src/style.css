@@ -1,93 +1,93 @@
-/* On force la page entière à prendre toute la fenêtre. */
+/* Force the whole page to fill the window. */
 html,
 body {
-  /* Supprime les marges par défaut du navigateur. */
+  /* Remove the browser's default margins. */
   margin: 0;
 
-  /* La page prend toute la largeur disponible. */
+  /* The page takes the full available width. */
   width: 100%;
 
-  /* La page prend toute la hauteur disponible. */
+  /* The page takes the full available height. */
   height: 100%;
 
-  /* Empêche le scroll. Le viewer doit être plein écran. */
+  /* Prevent scrolling. The viewer must be fullscreen. */
   overflow: hidden;
 
-  /* Fond noir propre derrière le canvas. */
+  /* Clean black background behind the canvas. */
   background: black;
 }
 
-/* #app est le conteneur principal créé par Vite dans index.html. */
+/* #app is the main container created by Vite in index.html. */
 #app {
-  /* Il prend toute la largeur de la fenêtre. */
+  /* It takes the full window width. */
   width: 100vw;
 
-  /* Il prend toute la hauteur de la fenêtre. */
+  /* It takes the full window height. */
   height: 100vh;
 }
 
-/* Canvas où WebGL dessine la fractale. */
+/* Canvas where the fractal is drawn. */
 #fractal-canvas {
-  /* Évite les petits espaces HTML autour du canvas. */
+  /* Avoids the small HTML gaps around the canvas. */
   display: block;
 
-  /* Le canvas occupe toute la largeur visible. */
+  /* The canvas fills the visible width. */
   width: 100vw;
 
-  /* Le canvas occupe toute la hauteur visible. */
+  /* The canvas fills the visible height. */
   height: 100vh;
 
-  /* Le tactile est géré par nos Pointer Events (pan, pinch) : on désactive les
-     gestes natifs du navigateur (scroll, zoom de page) sur le canvas. */
+  /* Touch is handled by our Pointer Events (pan, pinch): disable the
+     browser's native gestures (scroll, page zoom) on the canvas. */
   touch-action: none;
 }
 
 
-/* Overlay de statistiques affiché au-dessus du canvas. */
+/* Stats overlay displayed above the canvas. */
 #stats-overlay {
-  /* Position fixe par rapport à la fenêtre. */
+  /* Fixed position relative to the window. */
   position: fixed;
 
-  /* Placement en haut à gauche. */
+  /* Top-left placement. */
   top: 12px;
   left: 12px;
 
-  /* Met l'overlay au-dessus du canvas. */
+  /* Puts the overlay above the canvas. */
   z-index: 10;
 
-  /* Fond noir transparent pour rester lisible. */
+  /* Translucent black background to stay readable. */
   background: rgba(0, 0, 0, 0.65);
 
-  /* Texte clair. */
+  /* Light text. */
   color: white;
 
-  /* Police monospace utile pour les nombres. */
+  /* Monospace font, handy for numbers. */
   font-family: Consolas, Monaco, monospace;
 
-  /* Taille raisonnable. */
+  /* Reasonable size. */
   font-size: 13px;
 
-  /* Espacement interne. */
+  /* Inner spacing. */
   padding: 8px 10px;
 
-  /* Coins légèrement arrondis. */
+  /* Slightly rounded corners. */
   border-radius: 6px;
 
-  /* Empêche l'overlay de capturer la souris. */
+  /* Prevents the overlay from capturing the mouse. */
   pointer-events: none;
 
-  /* Hauteur de ligne plus lisible. */
+  /* More readable line height. */
   line-height: 1.4;
 
-  /* Bordure fine + flou pour un rendu « verre ». */
+  /* Thin border + blur for a "glass" look. */
   border: 1px solid rgba(255, 255, 255, 0.08);
   backdrop-filter: blur(10px);
 
-  /* Apparition douce au chargement. */
+  /* Gentle appearance on load. */
   animation: fade-in 0.9s ease both;
 }
 
-/* Titre de l'overlay de stats. */
+/* Stats overlay title. */
 .stats-title {
   font-weight: 700;
   letter-spacing: 0.06em;
@@ -95,7 +95,7 @@ body {
   color: #8fb3ff;
 }
 
-/* Apparition en fondu (intro). */
+/* Fade-in (intro). */
 @keyframes fade-in {
   from {
     opacity: 0;
@@ -105,12 +105,12 @@ body {
   }
 }
 
-/* Le canvas apparaît lui aussi en douceur au chargement. */
+/* The canvas also fades in gently on load. */
 #fractal-canvas {
   animation: fade-in 1.1s ease both;
 }
 
-/* --- Panneau de contrôle (bas droite) --- */
+/* --- Control panel (bottom right) --- */
 .control-panel {
   position: fixed;
   bottom: 16px;
@@ -149,7 +149,7 @@ body {
   color: #9aa4b8;
 }
 
-/* Rangée de pastilles de palette. */
+/* Row of palette swatches. */
 .swatches {
   display: flex;
   gap: 6px;
@@ -176,7 +176,7 @@ body {
   box-shadow: 0 0 0 2px rgba(140, 172, 255, 0.55);
 }
 
-/* Mini carte de Mandelbrot (sélection de c). */
+/* Mini Mandelbrot map (c picker). */
 .mandelbrot-picker {
   position: relative;
   border-radius: 8px;
@@ -188,11 +188,11 @@ body {
 .mandelbrot-picker canvas {
   display: block;
 
-  /* Le marqueur se déplace au doigt : pas de scroll natif sur la carte. */
+  /* The marker is dragged with a finger: no native scrolling on the map. */
   touch-action: none;
 }
 
-/* Marqueur (croix cerclée) indiquant le c courant. */
+/* Marker (circled dot) showing the current c. */
 .mandelbrot-marker {
   position: absolute;
   width: 14px;
@@ -212,7 +212,7 @@ body {
   border-radius: 50%;
 }
 
-/* Saisie manuelle de c (réel + imaginaire). */
+/* Manual c input (real + imaginary). */
 .c-inputs {
   display: flex;
   align-items: center;
@@ -238,14 +238,14 @@ body {
   border-color: #7c9cff;
 }
 
-/* Masque les petites flèches des champs numériques (rendu plus net). */
+/* Hide the small arrows of the number inputs (cleaner look). */
 .c-input::-webkit-outer-spin-button,
 .c-input::-webkit-inner-spin-button {
   -webkit-appearance: none;
   margin: 0;
 }
 
-/* Boutons d'action. */
+/* Action buttons. */
 .panel-actions {
   display: flex;
   flex-direction: column;
@@ -287,7 +287,7 @@ body {
   cursor: default;
 }
 
-/* Puce de raccourci clavier (ex : R, S) affichée dans les boutons. */
+/* Keyboard shortcut chip (e.g. R, S) shown inside buttons. */
 .action-button kbd {
   display: inline-block;
   min-width: 14px;
@@ -302,14 +302,14 @@ body {
   border-radius: 4px;
 }
 
-/* Ligne « profondeur max » dans l'overlay de stats. */
+/* "Max depth" line in the stats overlay. */
 .stats-limit {
   margin-top: 4px;
   color: #ffcf87;
   font-weight: 600;
 }
 
-/* Message éphémère « profondeur maximale atteinte » (haut centre). */
+/* Transient "maximum depth reached" message (top centre). */
 .zoom-toast {
   position: fixed;
   top: 24px;
@@ -337,8 +337,8 @@ body {
   transform: translateX(-50%) translateY(0);
 }
 
-/* Sur petit écran (mobile), le panneau prend la largeur et l'overlay se fait
-   discret pour laisser la place à la fractale. */
+/* On small screens (mobile) the panel takes the full width and the overlay
+   stays discreet to leave room for the fractal. */
 @media (max-width: 480px) {
   .control-panel {
     left: 12px;

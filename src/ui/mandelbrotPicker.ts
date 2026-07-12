@@ -1,22 +1,22 @@
-// Sélecteur de c via une mini-carte de Mandelbrot.
+// c picker using a mini Mandelbrot map.
 //
-// Chaque point c du plan complexe correspond à un ensemble de Julia. La carte de
-// Mandelbrot est justement « l'atlas » de tous ces c : on la dessine en petit et
-// l'utilisateur déplace un marqueur dessus pour choisir le c de la fractale Julia
-// affichée en grand. C'est le même principe que sur icefractal.
+// Every point c of the complex plane corresponds to one Julia set. The
+// Mandelbrot map is precisely the "atlas" of all those c: we draw it small and
+// the user drags a marker on it to pick the c of the Julia fractal displayed
+// full-screen. Same principle as on icefractal.
 //
-// Rendu Mandelbrot une seule fois (image statique, vue fixe) via un petit WebGL2
-// indépendant du backend principal. Si WebGL2 manque, la carte reste vide mais on
-// peut toujours choisir un c (le marqueur et le mapping fonctionnent).
+// The Mandelbrot is rendered once (static image, fixed view) with a small
+// WebGL2 context independent from the main backend. If WebGL2 is missing, the
+// map stays empty but picking a c still works (marker and mapping remain).
 
-// Domaine complexe affiché par la carte (montre tout l'ensemble). Son ratio
-// largeur/hauteur doit coller à celui du canvas pour éviter toute déformation.
+// Complex domain shown by the map (covers the whole set). Its width/height
+// ratio must match the canvas's to avoid any distortion.
 const RE_MIN = -2.38;
 const RE_MAX = 0.98;
 const IM_MIN = -1.4;
 const IM_MAX = 1.4;
 
-// Taille d'affichage de la carte en pixels CSS (aspect = 3.36 / 2.8 = 1.2).
+// Map display size in CSS pixels (aspect = 3.36 / 2.8 = 1.2).
 const MAP_W = 240;
 const MAP_H = 200;
 
@@ -26,7 +26,7 @@ in vec2 a_position;
 void main() { gl_Position = vec4(a_position, 0.0, 1.0); }
 `;
 
-// Mandelbrot classique, coloration bleutée discrète (le marqueur doit ressortir).
+// Classic Mandelbrot, subtle blue-ish colouring (the marker must stand out).
 const fragmentSrc = `#version 300 es
 precision highp float;
 uniform vec2 u_resolution;
@@ -34,7 +34,7 @@ uniform vec4 u_domain; // (reMin, reMax, imMin, imMax)
 out vec4 outColor;
 
 void main() {
-  vec2 uv = gl_FragCoord.xy / u_resolution; // (0,0) en bas à gauche
+  vec2 uv = gl_FragCoord.xy / u_resolution; // (0,0) at bottom-left
   float cr = mix(u_domain.x, u_domain.y, uv.x);
   float ci = mix(u_domain.z, u_domain.w, uv.y);
 
@@ -49,7 +49,7 @@ void main() {
   }
 
   if (!escaped) {
-    outColor = vec4(0.04, 0.05, 0.08, 1.0); // intérieur : presque noir bleuté
+    outColor = vec4(0.04, 0.05, 0.08, 1.0); // interior: near-black blue
     return;
   }
   float sm = (float(iter) + 1.0 - log2(0.5 * log2(m2))) / 120.0;
@@ -59,18 +59,18 @@ void main() {
 `;
 
 export type MandelbrotPicker = {
-  // Élément racine à insérer dans le DOM.
+  // Root element to insert into the DOM.
   element: HTMLElement;
 
-  // Repositionne le marqueur (sans déclencher onChange). Pour l'état initial.
+  // Repositions the marker (without triggering onChange). For the initial state.
   setC(cx: number, cy: number): void;
 };
 
-// Dessine la carte une fois dans son canvas (statique).
+// Draws the map once into its canvas (static).
 function renderMap(canvas: HTMLCanvasElement): void {
   const gl = canvas.getContext("webgl2");
   if (!gl) {
-    return; // pas de WebGL2 : carte vide, mais la sélection reste possible
+    return; // no WebGL2: empty map, but picking still works
   }
 
   const compile = (type: number, src: string): WebGLShader => {
@@ -120,15 +120,15 @@ export function createMandelbrotPicker(
 
   renderMap(canvas);
 
-  // Pixel (dans la carte) -> point complexe c.
+  // Pixel (inside the map) -> complex point c.
   const pixelToC = (px: number, py: number): [number, number] => {
     const cx = RE_MIN + (px / MAP_W) * (RE_MAX - RE_MIN);
-    const cy = IM_MAX - (py / MAP_H) * (IM_MAX - IM_MIN); // y écran inversé
+    const cy = IM_MAX - (py / MAP_H) * (IM_MAX - IM_MIN); // screen y is inverted
     return [cx, cy];
   };
 
-  // Repositionne le marqueur à partir d'un c (borné à la carte : un c saisi
-  // hors champ colle simplement au bord).
+  // Repositions the marker from a c value (clamped to the map: a c typed
+  // out of range simply sticks to the edge).
   const placeMarker = (cx: number, cy: number): void => {
     const px = ((cx - RE_MIN) / (RE_MAX - RE_MIN)) * MAP_W;
     const py = ((IM_MAX - cy) / (IM_MAX - IM_MIN)) * MAP_H;
@@ -136,7 +136,7 @@ export function createMandelbrotPicker(
     marker.style.top = `${Math.max(0, Math.min(MAP_H, py))}px`;
   };
 
-  // Traduit un événement pointeur en c, borné à la carte.
+  // Translates a pointer event into a c value, clamped to the map.
   const emitFromEvent = (event: PointerEvent): void => {
     const rect = canvas.getBoundingClientRect();
     const px = Math.max(0, Math.min(MAP_W, event.clientX - rect.left));

@@ -1,6 +1,6 @@
-// Panneau de contrôle (bas de l'écran) : palettes, sélecteur de c (mini
-// Mandelbrot), export PNG, reset. Purement DOM ; il ne fait que remonter des
-// callbacks à main.ts, qui détient l'état et déclenche les rendus.
+// Control panel (bottom of the screen): palettes, c picker (mini Mandelbrot),
+// PNG export, reset. Pure DOM; it only surfaces callbacks to main.ts, which
+// owns the state and triggers renders.
 
 import { PALETTES, paletteGradientCss } from "./palettes";
 import { createMandelbrotPicker } from "./mandelbrotPicker";
@@ -17,14 +17,14 @@ export type ControlPanelOptions = {
 
 export type ControlPanel = {
   element: HTMLElement;
-  // Bascule l'état visuel du bouton d'export pendant la génération de l'image.
+  // Toggles the export button's visual state while the image is generated.
   setSaving(saving: boolean): void;
-  // Retour visuel bref après la copie du lien.
+  // Brief visual feedback after the link is copied.
   flashCopied(): void;
-  // Synchronise l'affichage (champs + marqueur) sur un c venu de l'extérieur
-  // (ex : restauration d'un lien partagé). Ne déclenche pas onPickC.
+  // Syncs the display (fields + marker) with a c coming from outside
+  // (e.g. restoring a shared link). Does not trigger onPickC.
   setC(cx: number, cy: number): void;
-  // Synchronise la pastille de palette active. Ne déclenche pas onSelectPalette.
+  // Syncs the active palette swatch. Does not trigger onSelectPalette.
   setPalette(index: number): void;
 };
 
@@ -32,7 +32,7 @@ export function createControlPanel(opts: ControlPanelOptions): ControlPanel {
   const element = document.createElement("div");
   element.className = "control-panel";
 
-  // --- Section palettes ---
+  // --- Palettes section ---
   const palSection = document.createElement("div");
   palSection.className = "panel-section";
   palSection.appendChild(makeLabel("Palette"));
@@ -59,16 +59,16 @@ export function createControlPanel(opts: ControlPanelOptions): ControlPanel {
   palSection.appendChild(swatches);
   element.appendChild(palSection);
 
-  // --- Section sélecteur de c (mini Mandelbrot + saisie manuelle) ---
+  // --- c picker section (mini Mandelbrot + manual input) ---
   const cSection = document.createElement("div");
   cSection.className = "panel-section";
-  cSection.appendChild(makeLabel("Paramètre c — glisse sur la carte ou saisis"));
+  cSection.appendChild(makeLabel("Parameter c — drag on the map or type"));
 
-  // Champs de saisie de c (partie réelle + imaginaire).
+  // c input fields (real + imaginary parts).
   const reInput = makeNumberInput();
   const imInput = makeNumberInput();
 
-  // La carte met à jour les champs quand on la glisse.
+  // The map updates the fields while dragging.
   const picker = createMandelbrotPicker((cx, cy) => {
     reInput.value = cx.toFixed(4);
     imInput.value = cy.toFixed(4);
@@ -76,7 +76,7 @@ export function createControlPanel(opts: ControlPanelOptions): ControlPanel {
   });
   cSection.appendChild(picker.element);
 
-  // La saisie manuelle met à jour la carte (marqueur) et la fractale.
+  // Manual input updates the map (marker) and the fractal.
   const applyFromInputs = (): void => {
     const cx = parseFloat(reInput.value);
     const cy = parseFloat(imInput.value);
@@ -94,23 +94,23 @@ export function createControlPanel(opts: ControlPanelOptions): ControlPanel {
   cSection.appendChild(cInputs);
   element.appendChild(cSection);
 
-  // État initial : champs + marqueur.
+  // Initial state: fields + marker.
   reInput.value = opts.initialC.x.toFixed(4);
   imInput.value = opts.initialC.y.toFixed(4);
   picker.setC(opts.initialC.x, opts.initialC.y);
 
-  // --- Boutons ---
+  // --- Buttons ---
   const actions = document.createElement("div");
   actions.className = "panel-actions";
 
-  const saveLabel = "Enregistrer l'image <kbd>S</kbd>";
+  const saveLabel = "Save image <kbd>S</kbd>";
   const saveButton = document.createElement("button");
   saveButton.className = "action-button primary";
   saveButton.innerHTML = saveLabel;
   saveButton.addEventListener("click", () => opts.onSave());
   actions.appendChild(saveButton);
 
-  const copyLabel = "Copier le lien";
+  const copyLabel = "Copy link";
   const copyButton = document.createElement("button");
   copyButton.className = "action-button";
   copyButton.textContent = copyLabel;
@@ -119,7 +119,7 @@ export function createControlPanel(opts: ControlPanelOptions): ControlPanel {
 
   const resetButton = document.createElement("button");
   resetButton.className = "action-button";
-  resetButton.innerHTML = "Réinitialiser la vue <kbd>R</kbd>";
+  resetButton.innerHTML = "Reset view <kbd>R</kbd>";
   resetButton.addEventListener("click", () => opts.onReset());
   actions.appendChild(resetButton);
 
@@ -142,13 +142,13 @@ export function createControlPanel(opts: ControlPanelOptions): ControlPanel {
     setSaving(saving: boolean): void {
       saveButton.disabled = saving;
       if (saving) {
-        saveButton.textContent = "Génération…";
+        saveButton.textContent = "Rendering…";
       } else {
         saveButton.innerHTML = saveLabel;
       }
     },
     flashCopied(): void {
-      copyButton.textContent = "Lien copié !";
+      copyButton.textContent = "Link copied!";
       if (copyTimer !== null) {
         clearTimeout(copyTimer);
       }

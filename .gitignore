@@ -33,5 +33,6 @@ cuda/*.exp
 cuda/*.lib
 cuda/*.obj
 
-
-
+# Python environment (uv)
+.venv/
+.uv-cache/

@@ -1,14 +1,14 @@
-// Contrôles utilisateur : molette (zoom), drag / tactile (pan, pinch), clavier (reset).
+// User controls: wheel (zoom), drag / touch (pan, pinch), keyboard (reset).
 //
-// Ce module traduit les événements pointeur/clavier en opérations sur le Viewport,
-// puis demande un nouveau rendu. Il est indépendant du backend : il marche à
-// l'identique avec WebGPU ou WebGL2. Les Pointer Events couvrent à la fois la
-// souris et le tactile : 1 pointeur = pan, 2 pointeurs = pinch (zoom + pan).
+// This module translates pointer/keyboard events into Viewport operations,
+// then requests a new render. Backend-independent: it works identically with
+// WebGPU or WebGL2. Pointer Events cover both mouse and touch:
+// 1 pointer = pan, 2 pointers = pinch (zoom + pan).
 
 import type { Viewport } from "../core/viewport";
 
-// Vrai si un raccourci clavier doit être ignoré : l'utilisateur est en train de
-// taper dans un champ, ou il s'agit d'une combinaison navigateur (Ctrl+S, Ctrl+R...).
+// True when a keyboard shortcut should be ignored: the user is typing into a
+// field, or it is a browser combination (Ctrl+S, Ctrl+R...).
 export function shouldIgnoreShortcut(event: KeyboardEvent): boolean {
   if (event.ctrlKey || event.metaKey || event.altKey) {
     return true;
@@ -20,10 +20,10 @@ export function shouldIgnoreShortcut(event: KeyboardEvent): boolean {
   );
 }
 
-// Branche tous les écouteurs d'événements sur le canvas et la fenêtre.
-// `requestRender` est appelé quand la vue change (pan/reset). `onWheel` reçoit
-// chaque cran de molette et `onPinch` chaque variation d'écart entre deux doigts :
-// main pilote le zoom fluide (voir viewport.nudgeZoom / nudgeZoomByFactor).
+// Attaches all event listeners to the canvas and the window.
+// `requestRender` is called when the view changes (pan/reset). `onWheel`
+// receives each wheel notch and `onPinch` each two-finger spread change:
+// main drives the smooth zoom (see viewport.nudgeZoom / nudgeZoomByFactor).
 export function attachControls(
   canvas: HTMLCanvasElement,
   viewport: Viewport,
@@ -31,17 +31,17 @@ export function attachControls(
   onWheel: (mouseX: number, mouseY: number, rect: DOMRect, deltaY: number) => void,
   onPinch: (midX: number, midY: number, rect: DOMRect, factor: number) => void,
 ): void {
-  // Zoom molette, centré sur le curseur (délégué à main pour l'inertie).
+  // Wheel zoom, centred on the cursor (delegated to main for inertia).
   canvas.addEventListener("wheel", (event: WheelEvent) => {
     event.preventDefault();
     const rect = canvas.getBoundingClientRect();
     onWheel(event.clientX, event.clientY, rect, event.deltaY);
   });
 
-  // Pointeurs actifs sur le canvas (souris bouton gauche, doigts, stylet).
+  // Active pointers on the canvas (left mouse button, fingers, stylus).
   const pointers = new Map<number, { x: number; y: number }>();
 
-  // Milieu et écartement des deux pointeurs (état du pinch en cours).
+  // Midpoint and spread of the two pointers (state of the ongoing pinch).
   const pinchInfo = (): { midX: number; midY: number; dist: number } => {
     const [a, b] = [...pointers.values()];
     return {
@@ -53,12 +53,12 @@ export function attachControls(
 
   canvas.addEventListener("pointerdown", (event: PointerEvent) => {
     if (event.pointerType === "mouse" && event.button !== 0) {
-      return; // pan à la souris : bouton gauche uniquement
+      return; // mouse pan: left button only
     }
     if (pointers.size >= 2) {
-      return; // au-delà de deux doigts, les suivants sont ignorés
+      return; // beyond two fingers, extra pointers are ignored
     }
-    // La capture garantit que le drag continue même en sortant du canvas.
+    // Capturing guarantees the drag continues even when leaving the canvas.
     canvas.setPointerCapture(event.pointerId);
     pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
   });
@@ -69,7 +69,7 @@ export function attachControls(
     }
 
     if (pointers.size === 2) {
-      // Pinch : le milieu des deux doigts déplace la vue, leur écartement zoome.
+      // Pinch: the two-finger midpoint pans the view, their spread zooms.
       const before = pinchInfo();
       pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
       const after = pinchInfo();
@@ -81,14 +81,14 @@ export function attachControls(
         canvas.clientHeight,
       );
       if (before.dist > 0 && after.dist > 0) {
-        // Doigts qui s'écartent => facteur < 1 => zoom avant.
+        // Fingers spreading => factor < 1 => zoom in.
         onPinch(after.midX, after.midY, canvas.getBoundingClientRect(), before.dist / after.dist);
       }
       requestRender();
       return;
     }
 
-    // Un seul pointeur : pan classique.
+    // Single pointer: classic pan.
     const prev = pointers.get(event.pointerId)!;
     viewport.panByPixels(
       event.clientX - prev.x,
@@ -100,19 +100,19 @@ export function attachControls(
     requestRender();
   });
 
-  // Fin de drag / pinch (le navigateur libère la capture tout seul).
+  // End of drag / pinch (the browser releases the capture on its own).
   const endPointer = (event: PointerEvent): void => {
     pointers.delete(event.pointerId);
   };
   canvas.addEventListener("pointerup", endPointer);
   canvas.addEventListener("pointercancel", endPointer);
 
-  // Si la fenêtre perd le focus, on annule tout geste en cours.
+  // If the window loses focus, cancel any ongoing gesture.
   window.addEventListener("blur", () => {
     pointers.clear();
   });
 
-  // Touche R : réinitialise la vue.
+  // R key: reset the view.
   window.addEventListener("keydown", (event: KeyboardEvent) => {
     if (shouldIgnoreShortcut(event)) {
       return;
