@@ -123,9 +123,11 @@ void main() {
   }
 
   // Smooth colouring, consistent with the WebGPU backend (samples the LUT).
+  // Log-damped colour density — see julia.wgsl for the rationale.
   float nu = log2(0.5 * log2(mag2));
   float smoothIter = float(iter) + 1.0 - nu;
-  outColor = vec4(texture(u_lut, vec2(smoothIter * 0.02, 0.5)).rgb, 1.0);
+  float t = 5.545 * log2(1.0 + smoothIter / 400.0);
+  outColor = vec4(texture(u_lut, vec2(t, 0.5)).rgb, 1.0);
 }
 `;
 

@@ -219,7 +219,14 @@ __global__ static void renderKernel(unsigned char* out, int W, int H,
 
   // Smooth colouring, identical to the browser backends.
   float nu = log2f(0.5f * log2f((float)mag2));
-  float t = ((float)iter + 1.0f - nu) * 0.02f;
+  float si = (float)iter + 1.0f - nu;
+  // Log-damped colour density. A linear t = si * 0.02 cycles the palette
+  // several times per pixel wherever the set fills the frame (neighbouring
+  // pixels differ by hundreds of iterations), dissolving detail into grey
+  // speckle. The log keeps band width constant per iteration *ratio*; its
+  // slope at 0 equals the old 0.02 (5.545 = 0.02 * 400 / ln 2), so shallow
+  // views are unchanged.
+  float t = 5.545f * log2f(1.0f + si / 400.0f);
   float3 c = palette(t);
   px[0] = (unsigned char)fminf(255.0f, fmaxf(0.0f, c.x * 255.0f));
   px[1] = (unsigned char)fminf(255.0f, fmaxf(0.0f, c.y * 255.0f));

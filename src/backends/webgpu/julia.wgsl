@@ -109,7 +109,11 @@ fn fs(@builtin(position) fragCoord : vec4f) -> @location(0) vec4f {
   let nu = log2(0.5 * log2(mag2));           // log2(log2(|z|))
   let smoothIter = f32(iter) + 1.0 - nu;
   // Sample the LUT; the "repeat" sampler makes the palette cycle.
-  let t = smoothIter * 0.02;
+  // Log-damped colour density (identical in GLSL/CUDA/Python): a linear
+  // t = smoothIter * 0.02 cycles the palette several times per pixel in dense
+  // regions and dissolves them into grey speckle. The slope at 0 matches the
+  // old 0.02 (5.545 = 0.02 * 400 / ln 2), so shallow views are unchanged.
+  let t = 5.545 * log2(1.0 + smoothIter / 400.0);
   let rgb = textureSampleLevel(paletteLut, paletteSampler, vec2f(t, 0.5), 0.0).rgb;
   return vec4f(rgb, 1.0);
 }

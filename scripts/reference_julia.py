@@ -28,18 +28,29 @@ import numpy as np
 from PIL import Image
 
 
-# Smooth colouring, strictly identical to the GPU backends.
+# "Ice fractal" gradient, same stops as the browser default palette
+# (src/ui/palettes.ts) and the CUDA `palette` (cuda/julia.cu).
+ICE_POS = [0.0, 0.16, 0.42, 0.6425, 0.8575, 1.0]
+ICE_COL = [(0, 7, 100), (32, 107, 203), (237, 255, 255), (255, 170, 0), (0, 2, 0), (0, 7, 100)]
+
+
+# Smooth colouring, strictly identical to the GPU backends: log-damped colour
+# density (slope at 0 matches a linear 0.02: 5.545 = 0.02 * 400 / ln 2) into
+# the Ice fractal gradient, wrapped like the shaders' repeat sampler.
 def color(iter_count: int, mag2: float, max_iter: int) -> tuple[int, int, int]:
     if iter_count >= max_iter:
         return (0, 0, 0)  # interior
     nu = math.log2(0.5 * math.log2(mag2))
-    t = (iter_count + 1.0 - nu) * 0.02
-    tau = 6.2831853
-    r = 0.5 + 0.5 * math.cos(tau * (0.00 + t))
-    g = 0.5 + 0.5 * math.cos(tau * (0.33 + t))
-    b = 0.5 + 0.5 * math.cos(tau * (0.67 + t))
-    clamp = lambda v: max(0, min(255, int(v * 255.0)))
-    return (clamp(r), clamp(g), clamp(b))
+    si = iter_count + 1.0 - nu
+    t = 5.545 * math.log2(1.0 + si / 400.0)
+    t -= math.floor(t)
+    for k in range(5):
+        if t <= ICE_POS[k + 1]:
+            f = (t - ICE_POS[k]) / (ICE_POS[k + 1] - ICE_POS[k])
+            c0, c1 = ICE_COL[k], ICE_COL[k + 1]
+            # int() truncates, matching CUDA's (unsigned char) cast.
+            return tuple(max(0, min(255, int(c0[j] + (c1[j] - c0[j]) * f))) for j in range(3))
+    return ICE_COL[-1]
 
 
 # Vectorized direct iteration in float64. Fast, valid at moderate zoom.
