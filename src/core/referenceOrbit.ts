@@ -9,15 +9,21 @@
 //   Z_0 = view centre
 //   Z_{n+1} = Z_n² + c
 //
-// Each Z_n is stored as float32 (real part then imaginary part): that is what
-// the shader reads. The high precision is only needed to POSITION the reference
-// correctly; the Z_n values themselves stay of order 1 (the orbit is bounded).
+// Each point is stored as float32 (real part then imaginary part) RELATIVE to
+// Z_0: the shader reads D_n = Z_n − Z_0 and receives Z_0 separately in its
+// uniforms. Storing absolute Z_n would quantise them to the f32 grid of O(1)
+// values (~1e-7): near a fixed point, where the orbit hovers around Z_0 and
+// pixel deltas are ~scale, the rebasing step δ = z − Z_0 then loses most of
+// its bits and neighbouring pixels collapse onto the same delta — visible as
+// blocky glitches from ~1e-5 scales down. The D_n, computed in double-double
+// and rounded once, keep full f32 relative precision however small they are.
 
 import type { Dd } from "./doubleDouble";
 import { ddSub, ddMul, ddAddNumber } from "./doubleDouble";
 
 export type ReferenceOrbit = {
-  // Interleaved points: [Zx0, Zy0, Zx1, Zy1, ...], ready to upload to the GPU.
+  // Interleaved points RELATIVE to Z0: [Dx0, Dy0, Dx1, Dy1, ...] with
+  // D_n = Z_n − Z_0 (so D_0 = 0), ready to upload to the GPU.
   data: Float32Array;
 
   // Number of points actually computed (may be < maxIter if the orbit escapes).
@@ -44,9 +50,12 @@ export function computeReferenceOrbit(
   let length = 0;
 
   for (let i = 0; i < maxIter; i++) {
-    // Store the current point as float32 (the assignment rounds float64 -> float32).
-    data[i * 2] = zx.hi + zx.lo;
-    data[i * 2 + 1] = zy.hi + zy.lo;
+    // Store the current point relative to Z0, computed in double-double so the
+    // subtraction is exact; the assignment rounds float64 -> float32 once.
+    const dx = ddSub(zx, centerX);
+    const dy = ddSub(zy, centerY);
+    data[i * 2] = dx.hi + dx.lo;
+    data[i * 2 + 1] = dy.hi + dy.lo;
     length = i + 1;
 
     // Escape test: beyond this the reference is meaningless. We always keep at

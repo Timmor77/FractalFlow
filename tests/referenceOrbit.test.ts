@@ -2,7 +2,8 @@
 //
 // The orbit is compared against a plain float64 JS iteration: at shallow depth
 // (centre of order 1) the DD computation must agree with float64 to within the
-// float32 rounding of the stored array.
+// float32 rounding of the stored array. The stored values are RELATIVE to Z0
+// (D_n = Z_n − Z_0); with a centre of 0 they coincide with the absolute orbit.
 
 import { describe, it, expect } from "vitest";
 import { computeReferenceOrbit } from "../src/core/referenceOrbit";
@@ -44,7 +45,8 @@ describe("orbit length invariants", () => {
     // boundary and its centre orbit actually escapes after ~253 iterations.)
     const orbit = computeReferenceOrbit(ddFromNumber(0), ddFromNumber(0), -0.5, 0, 500);
     expect(orbit.length).toBe(500);
-    // Every stored point of a bounded orbit stays within the escape radius.
+    // Centre 0 => stored offsets equal the absolute orbit, which must stay
+    // within the escape radius since it is bounded.
     for (let i = 0; i < orbit.length; i++) {
       const x = orbit.data[i * 2];
       const y = orbit.data[i * 2 + 1];
@@ -58,6 +60,25 @@ describe("orbit length invariants", () => {
     const orbit = computeReferenceOrbit(ddFromNumber(2), ddFromNumber(2), C.x, C.y, 100);
     expect(orbit.length).toBeGreaterThanOrEqual(2);
     expect(orbit.length).toBeLessThanOrEqual(100);
+  });
+
+  it("stores the orbit relative to Z0 with full relative precision", () => {
+    // Repelling fixed point of z² + c for c = -0.8 + 0.156i (it lies on the
+    // Julia set, so it is the natural target of a deep zoom). The orbit of the
+    // f64-rounded fixed point drifts away from it like |2z*|^n ≈ 3^n starting
+    // from the ~1e-16 rounding error, so after 20 iterations every offset is
+    // still below ~1e-6. Absolute f32 storage would put ~1.5 in data[2]:
+    // this is the regression guard for the blocky deep-zoom glitches.
+    const fx = 1.5275031186435346;
+    const fy = -0.07591217835228787;
+    const orbit = computeReferenceOrbit(ddFromNumber(fx), ddFromNumber(fy), C.x, C.y, 20);
+    expect(orbit.length).toBe(20);
+    expect(orbit.data[0]).toBe(0); // D_0 = Z_0 − Z_0 exactly
+    expect(orbit.data[1]).toBe(0);
+    for (let i = 0; i < orbit.length; i++) {
+      const mag = Math.hypot(orbit.data[i * 2], orbit.data[i * 2 + 1]);
+      expect(mag).toBeLessThan(1e-3);
+    }
   });
 
   it("always allocates maxIter * 2 floats (GPU upload contract)", () => {

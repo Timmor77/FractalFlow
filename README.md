@@ -64,6 +64,12 @@ precision (`|z − Z₀| < |δ|`) or the reference runs out, we restart from `Z[
 small per-pixel delta — so the shader is actually *simpler* than a naïve high-precision
 one, and much faster.
 
+One subtlety: the reference orbit is uploaded **relative to Z₀** (`D[m] = Z[m] − Z₀`,
+computed in double-double). Absolute `f32` orbit values would quantise the rebased delta
+`D[m] + δ` to the ~1e-7 grid of O(1) numbers — near a fixed point, where deltas shrink
+with the zoom, neighbouring pixels would collapse onto the same delta and dissolve the
+image into blocky noise. As offsets, both terms are small exactly when precision matters.
+
 The high-precision centre is stored as a **double-double** value (two `float64`s, where
 the second holds the rounding error of the first), which is what lets the browser reach
 ~`1e-28` zoom.
@@ -240,11 +246,11 @@ uv run python scripts/make_zoom_gif.py
 Done: WebGL2 viewer → modular architecture → cursor-anchored inertial zoom → smooth
 colouring → **WebGPU backend** → **perturbation deep zoom** → **CUDA renderer +
 benchmark** → **mpmath validation** → interactive `c` + palettes → PNG export →
-shareable URLs → touch/pinch → test suite + CI → cross-backend benchmarks.
+shareable URLs → touch/pinch → test suite + CI → cross-backend benchmarks →
+**orbit-relative reference storage** (glitch-free `f32` rebasing near fixed points).
 
 Next: quad-double centre for `1e-50+` zoom · series approximation to skip early
-iterations · glitch detection for the `f32` path near degenerate references ·
-progressive/tiled rendering.
+iterations · progressive/tiled rendering.
 
 ## Stack
 

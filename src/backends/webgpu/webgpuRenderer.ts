@@ -13,7 +13,7 @@ import { MAX_ITER_LIMIT, MAX_DPR } from "../../core/config";
 import shaderCode from "./julia.wgsl?raw";
 
 // Size of the uniform block (see struct Uniforms in the shader).
-// resolution(8) + scale(4) + aspect(4) + maxIter(4) + refLength(4) = 24, rounded up to 32.
+// resolution(8) + scale(4) + aspect(4) + maxIter(4) + refLength(4) + center(8) = 32.
 const UNIFORM_SIZE = 32;
 
 // Width of the palette colour lookup table (LUT). See ui/palettes.ts.
@@ -201,6 +201,10 @@ export class WebGPURenderer implements Renderer {
     f[3] = width / height;
     uint[4] = view.maxIter;
     uint[5] = orbit.length;
+    // Z0 in f32: the orbit buffer stores offsets relative to it (the
+    // Float32Array assignment performs the float64 -> float32 rounding).
+    f[6] = view.centerX.hi + view.centerX.lo;
+    f[7] = view.centerY.hi + view.centerY.lo;
     device.queue.writeBuffer(this.uniformBuffer, 0, this.uniformData);
 
     // 4) Render pass: fullscreen triangle (3 vertices).
