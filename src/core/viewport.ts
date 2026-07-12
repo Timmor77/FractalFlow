@@ -25,8 +25,9 @@ export class Viewport {
 
   // Lower zoom bound. Set by the precision of the double-double centre:
   // ~31 mantissa digits for values of order 1 => we keep a comfortable margin
-  // down to ~1e-28 before precision visibly degrades.
-  private readonly minScale = 1e-28;
+  // down to ~1e-28 before precision visibly degrades. The WebGL2 fallback
+  // raises this floor to its own limit via setMinScale (Renderer.minScale).
+  private minScale = 1e-28;
 
   // Upper bound: barely above the default view (3.0). Beyond that the fractal
   // shrinks until it disappears, so we prevent zooming out too far.
@@ -43,6 +44,14 @@ export class Viewport {
   private anchorFx = 0; // normalized cursor position (aspect-corrected)
   private anchorFy = 0;
   private readonly zoomEase = 0.2; // fraction of the gap covered per frame
+
+  // Matches the zoom floor to the active backend's real precision
+  // (Renderer.minScale), re-clamping the current state if already deeper.
+  public setMinScale(value: number): void {
+    this.minScale = value;
+    this.scale = Math.max(this.minScale, this.scale);
+    this.targetScale = Math.max(this.minScale, this.targetScale);
+  }
 
   // Puts the camera back to its initial state.
   public reset(): void {

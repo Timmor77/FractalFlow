@@ -22,8 +22,10 @@ body {
   /* It takes the full window width. */
   width: 100vw;
 
-  /* It takes the full window height. */
+  /* Full window height. dvh tracks the REAL visible height on mobile
+     (the URL bar shows/hides); vh stays as the fallback. */
   height: 100vh;
+  height: 100dvh;
 }
 
 /* Canvas where the fractal is drawn. */
@@ -34,8 +36,9 @@ body {
   /* The canvas fills the visible width. */
   width: 100vw;
 
-  /* The canvas fills the visible height. */
+  /* The canvas fills the visible height (see #app for the dvh note). */
   height: 100vh;
+  height: 100dvh;
 
   /* Touch is handled by our Pointer Events (pan, pinch): disable the
      browser's native gestures (scroll, page zoom) on the canvas. */
@@ -337,19 +340,60 @@ body {
   transform: translateX(-50%) translateY(0);
 }
 
-/* On small screens (mobile) the panel takes the full width and the overlay
-   stays discreet to leave room for the fractal. */
-@media (max-width: 480px) {
+/* Floating button that shows/hides the panel. Desktop never needs it
+   (display: none by default); the mobile media query below reveals it. */
+.panel-toggle {
+  display: none;
+  position: fixed;
+  right: 14px;
+  bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+  z-index: 11;
+
+  width: 46px;
+  height: 46px;
+  padding: 0;
+  font-size: 20px;
+  line-height: 1;
+  color: #e8ecf4;
+
+  background: rgba(15, 18, 28, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 50%;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(14px);
+  cursor: pointer;
+
+  animation: fade-in 1s ease 0.2s both;
+}
+
+/* On small screens (mobile) the panel folds behind the toggle button, takes
+   the full width when open, and the overlay stays discreet to leave room for
+   the fractal. Safe-area insets keep the UI clear of notches and gesture bars. */
+@media (max-width: 640px) {
+  .panel-toggle {
+    display: block;
+  }
+
   .control-panel {
     left: 12px;
     right: 12px;
-    bottom: 12px;
     width: auto;
+
+    /* Sits above the toggle button. */
+    bottom: calc(70px + env(safe-area-inset-bottom, 0px));
+
+    /* Never taller than ~60% of the visible height (small landscape phones). */
+    max-height: 60dvh;
+    overflow-y: auto;
+  }
+
+  .control-panel.panel-hidden {
+    display: none;
   }
 
   #stats-overlay {
     font-size: 11px;
-    top: 8px;
-    left: 8px;
+    top: calc(8px + env(safe-area-inset-top, 0px));
+    left: calc(8px + env(safe-area-inset-left, 0px));
   }
 }

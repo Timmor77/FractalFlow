@@ -22,6 +22,10 @@ const PALETTE_SIZE = 256;
 export class WebGPURenderer implements Renderer {
   public readonly name = "WebGPU";
 
+  // Perturbation with a double-double reference (~31 digits): comfortable
+  // down to ~1e-28 before the centre precision degrades.
+  public readonly minScale = 1e-28;
+
   private readonly canvas: HTMLCanvasElement;
   private readonly device: GPUDevice;
   private readonly context: GPUCanvasContext;

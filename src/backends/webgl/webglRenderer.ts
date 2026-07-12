@@ -177,6 +177,13 @@ function getUniform(gl: WebGL2RenderingContext, program: WebGLProgram, name: str
 export class WebGLRenderer implements Renderer {
   public readonly name = "WebGL2";
 
+  // Double-single arithmetic tops out around 1e-14; keep a margin. Some
+  // mobile GPU drivers compile the error-free transforms with fast-math and
+  // collapse them to plain f32 (~1e-5): nothing we can detect from here, but
+  // this floor at least stops the zoom at the fallback's theoretical limit
+  // instead of pretending to reach 1e-28.
+  public readonly minScale = 1e-13;
+
   private readonly canvas: HTMLCanvasElement;
   private readonly gl: WebGL2RenderingContext;
   private readonly program: WebGLProgram;

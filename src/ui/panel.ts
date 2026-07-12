@@ -17,6 +17,9 @@ export type ControlPanelOptions = {
 
 export type ControlPanel = {
   element: HTMLElement;
+  // Small floating button that shows/hides the panel. The CSS only displays
+  // it on small (mobile) screens, where the full panel would cover the view.
+  toggleElement: HTMLElement;
   // Toggles the export button's visual state while the image is generated.
   setSaving(saving: boolean): void;
   // Brief visual feedback after the link is copied.
@@ -31,6 +34,21 @@ export type ControlPanel = {
 export function createControlPanel(opts: ControlPanelOptions): ControlPanel {
   const element = document.createElement("div");
   element.className = "control-panel";
+
+  // --- Mobile show/hide toggle ---
+  // On phones the panel starts hidden behind this button: the fractal is the
+  // point, not the controls. Desktop never sees the button (CSS) and the
+  // panel stays visible there whatever the class says.
+  const toggle = document.createElement("button");
+  toggle.className = "panel-toggle";
+  toggle.setAttribute("aria-label", "Show or hide the controls");
+  toggle.textContent = "🎛";
+  if (window.matchMedia("(max-width: 640px)").matches) {
+    element.classList.add("panel-hidden");
+  }
+  toggle.addEventListener("click", () => {
+    element.classList.toggle("panel-hidden");
+  });
 
   // --- Palettes section ---
   const palSection = document.createElement("div");
@@ -135,6 +153,7 @@ export function createControlPanel(opts: ControlPanelOptions): ControlPanel {
 
   return {
     element,
+    toggleElement: toggle,
     setC,
     setPalette(index: number): void {
       swatchButtons.forEach((b, i) => b.classList.toggle("active", i === index));

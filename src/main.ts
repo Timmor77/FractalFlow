@@ -65,6 +65,11 @@ async function startApp(): Promise<void> {
 
   const renderer = await createRenderer();
 
+  // Zoom floor matched to the backend's real precision: the WebGL2 fallback
+  // pixelates around 1e-13 (worse on some mobile drivers), so letting the
+  // camera go to 1e-28 there would only zoom into mush.
+  viewport.setMinScale(renderer.minScale);
+
   let rafId: number | null = null;
   let idleTimer: number | null = null;
   let renderCount = 0;
@@ -345,6 +350,7 @@ async function startApp(): Promise<void> {
     },
   });
   document.body.appendChild(panel.element);
+  document.body.appendChild(panel.toggleElement);
 
   // --- Intro animation: the view gently eases into the default zoom ---
   function runIntro(): void {
@@ -383,7 +389,12 @@ async function startApp(): Promise<void> {
   // nothing is recomputed (see controls) and a short message is shown.
   const zoomToast = document.createElement("div");
   zoomToast.className = "zoom-toast";
-  zoomToast.textContent = "Maximum depth reached";
+  // On the WebGL2 fallback the limit is the backend's, not the algorithm's:
+  // say so, and point at browsers that can go deeper.
+  zoomToast.textContent =
+    renderer.name === "WebGPU"
+      ? "Maximum depth reached"
+      : "WebGL2 fallback limit — a WebGPU browser (Chrome, Edge) zooms much deeper";
   document.body.appendChild(zoomToast);
   let toastTimer: number | null = null;
   function showZoomLimit(): void {

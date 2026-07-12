@@ -45,6 +45,11 @@ export interface Renderer {
   // Human-readable name shown in the overlay (e.g. "WebGPU", "WebGL2").
   readonly name: string;
 
+  // Deepest scale this backend can render without visible precision loss.
+  // The viewport uses it as its zoom floor: pushing past it would only
+  // produce pixelated mush, so we stop and tell the user instead.
+  readonly minScale: number;
+
   // Draws one frame for the given view state.
   render(view: ViewState): RenderInfo;
 

@@ -80,6 +80,18 @@ describe("zoom bounds", () => {
     expect(vp.nudgeZoomByFactor(400, 300, rect, 2.0)).toBe("zoom"); // backing off works
   });
 
+  it("adopts the backend's zoom floor and re-clamps the current state", () => {
+    // The WebGL2 fallback raises the floor to its own precision limit
+    // (Renderer.minScale): a deeper state restored from the URL must snap
+    // back to it, and further zooming in must report "blocked".
+    const vp = new Viewport();
+    vp.setView(ddFromNumber(0), ddFromNumber(0), 1e-20);
+    vp.setMinScale(1e-13);
+    expect(vp.scale).toBe(1e-13);
+    expect(vp.isAtMaxDepth()).toBe(true);
+    expect(vp.nudgeZoomByFactor(400, 300, makeRect(800, 600), 0.5)).toBe("blocked");
+  });
+
   it("never reports a negative zoom level", () => {
     const vp = new Viewport();
     expect(vp.getZoomLevel()).toBe(0);
