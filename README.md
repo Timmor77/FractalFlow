@@ -1,10 +1,11 @@
 # FractalFlow
 
 [![CI](https://github.com/Timmor77/FractalFlow/actions/workflows/ci.yml/badge.svg)](https://github.com/Timmor77/FractalFlow/actions/workflows/ci.yml)
-[![License: CC BY-NC-SA 4.0](https://img.shields.io/badge/License-CC_BY--NC--SA_4.0-blue.svg)](LICENSE)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 ![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6)
 ![WebGPU](https://img.shields.io/badge/WebGPU-WGSL-orange)
 ![CUDA](https://img.shields.io/badge/CUDA-C%2B%2B-76b900)
+[![Technical report](https://img.shields.io/badge/Technical_report-PDF-b31b1b.svg)](paper/main.pdf)
 
 Interactive, deep-zoom **Julia set explorer**. One algorithm — *perturbation theory* —
 implemented three times, in **WGSL**, **GLSL** and **CUDA C**, and cross-validated
@@ -126,19 +127,20 @@ Same workload on every backend: 13 zoom depths from `3` down to `3×10⁻¹²`,
 
 ![Iteration throughput vs zoom depth](docs/bench_giter.png)
 
-The counter-intuitive headline: **the browser out-runs native CUDA by ~13×** here.
+The counter-intuitive headline: **the browser out-runs native CUDA by ~15×** here.
 Not magic — the WebGPU shader iterates deltas in `f32`, while the CUDA kernel uses
 `f64`, and consumer Ampere executes fp64 at 1/64 of fp32 rate. That is precisely the
 trade perturbation theory exploits: do the precision-critical work once on the CPU
 (double-double reference orbit), and let the GPU crunch cheap low-precision deltas.
-The two implementations bracket the speed/precision spectrum, and both are validated
-against the same arbitrary-precision reference.
+The two implementations bracket the speed/precision spectrum. The frozen
+pixel-level validation matrix covers CUDA; WebGPU has unit-test and luma
+sanity coverage but is not claimed as pixel-validated in this release.
 
 ![Effective fill rate vs zoom depth](docs/bench_mpix.png)
 
-Peak numbers: **~922 GIter/s / 669 Mpix/s** (WebGPU, f32) vs **~72 GIter/s /
-128 Mpix/s** (CUDA, f64) vs **0.023 GIter/s** for vectorized NumPy float64 — a
-~40 000× CPU→GPU gap on this workload.
+Peak numbers: **~1,168 GIter/s / 518 Mpix/s** (WebGPU, f32) vs **~76.6 GIter/s /
+139 Mpix/s** (CUDA, f64) vs **0.023 GIter/s** for vectorized NumPy float64 — a
+~51 000× CPU→GPU gap on this workload.
 
 <details>
 <summary><b>Methodology & how to reproduce</b></summary>
@@ -150,7 +152,8 @@ Peak numbers: **~922 GIter/s / 669 Mpix/s** (WebGPU, f32) vs **~72 GIter/s /
   stop early). The convention is identical across backends, so comparisons hold.
 - The reference orbit is CPU-side and cached; timed frames measure pure GPU work.
 - Every sample includes a mean-luma readback to reject silently-black frames, and the
-  GPU adapter identity is recorded in the CSV header.
+  WebGPU adapter/browser identity is recorded in its CSV header; the full host,
+  driver and CUDA environment is frozen in `paper/data/environment.json`.
 - The WebGL2 fallback is deliberately **excluded** from the charts: under ANGLE/D3D11
   its double-single compensated arithmetic is compiled with fast-math and collapses to
   plain `f32`, so beyond shallow depths its output no longer matches the validated
@@ -175,11 +178,18 @@ uv run python scripts/benchmark.py
 
 ## Correctness
 
-The perturbation renderers are checked pixel-for-pixel against direct iteration:
+The CUDA perturbation renderer is checked pixel-for-pixel against direct
+arbitrary-precision iteration in four frozen cases:
 
-- **Full view** vs vectorised `float64`: **100 %** identical.
-- **Deep zoom (`1e-5`)** vs **mpmath** arbitrary precision: **100 %** identical
-  (`diff 0.000/255`) for CUDA; the WebGPU `f32` path matches within `0.04/255`.
+- **Overview**: mean RGB error **0.0002/255**, 99.95% identical pixels.
+- **Off-centre boundary**: mean RGB error **0.0988/255**, 99.83% of pixels
+  within four channel levels; the sparse outliers lie on an iteration boundary.
+- **Deep zoom (`1e-5`)**: mean RGB error **0.0002/255**, 99.95% identical.
+- **Fixed-point zoom (`1e-10`)**: mean RGB error **0.0059/255**, 99.98% within
+  four channel levels.
+
+The WebGPU path is not included in this frozen pixel matrix; automating raw
+WebGPU pixel export is documented as future validation work in the report.
 
 This caught a real bug during development: the rebasing step must restart with
 `δ = z − Z₀`, not `δ = z`. The two are only equal when `Z₀ = 0` (the Mandelbrot case),
@@ -264,9 +274,19 @@ iterations · progressive/tiled rendering.
 TypeScript · Vite · WebGPU (WGSL) · WebGL2 (GLSL) · CUDA C · Python + `uv`
 (NumPy, Pillow, mpmath, Matplotlib) · Vitest · GitHub Actions.
 
+## Cite
+
+The reproducible technical report
+[*FractalFlow: Portable Deep-Zoom Julia Rendering with Perturbation Theory
+across WebGPU and CUDA*](paper/main.pdf) documents the numerical method,
+cross-backend design, validation protocol and benchmark limitations. Citation
+metadata for GitHub and Zenodo is provided in [`CITATION.cff`](CITATION.cff)
+and [`.zenodo.json`](.zenodo.json). DOI badges and the final BibTeX entry are
+added only after the corresponding Zenodo records have been published.
+
 ## License
 
-[CC BY-NC-SA 4.0](LICENSE) — free to use, modify and share for
-non-commercial purposes, as long as derivatives keep the same license and
-credit the original. `cuda/stb_image_write.h` remains public domain
-(nothings/stb).
+[Apache License 2.0](LICENSE) — free to use, modify and distribute, including
+commercially, with attribution and an explicit patent grant. Copyright 2026
+Timofei Amosov. `cuda/stb_image_write.h` keeps its own dual MIT/public-domain
+license (nothings/stb).

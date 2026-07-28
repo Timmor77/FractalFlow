@@ -1,0 +1,3 @@
+# backend: numpy-f64 (vectorized direct iteration, colouring excluded)
+scale,maxIter,ms,GIterPerSec,MpixPerSec
+3.000000e+00,300,26476.613,0.023,0.1

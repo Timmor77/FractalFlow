@@ -1,0 +1,54 @@
+[
+  {
+    "id": "overview",
+    "label": "Overview",
+    "center_re": "0.0",
+    "center_im": "0.0",
+    "scale": 3.0,
+    "c_re": -0.8,
+    "c_im": 0.156,
+    "max_iter": 300,
+    "dps": 50,
+    "width": 64,
+    "height": 64
+  },
+  {
+    "id": "off_center",
+    "label": "Off-centre boundary",
+    "center_re": "0.76",
+    "center_im": "0.24",
+    "scale": 0.3,
+    "c_re": -0.8,
+    "c_im": 0.156,
+    "max_iter": 1100,
+    "dps": 50,
+    "width": 64,
+    "height": 64
+  },
+  {
+    "id": "deep_zoom",
+    "label": "Deep zoom",
+    "center_re": "0.0304",
+    "center_im": "-0.564",
+    "scale": 1e-5,
+    "c_re": -0.8,
+    "c_im": 0.156,
+    "max_iter": 700,
+    "dps": 60,
+    "width": 64,
+    "height": 64
+  },
+  {
+    "id": "fixed_point",
+    "label": "Repelling fixed point",
+    "center_re": "-0.527503118643534632274607931351916169475312417511732493905728256658568636526",
+    "center_im": "0.0759121783522878653764568658687429427997344025257309526545062431394591595504",
+    "scale": 1e-10,
+    "c_re": -0.8,
+    "c_im": 0.156,
+    "max_iter": 400,
+    "dps": 80,
+    "width": 64,
+    "height": 64
+  }
+]

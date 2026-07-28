@@ -40,6 +40,7 @@ type BenchRow = {
 type BackendResult = {
   backend: string;
   gpu: string;
+  browser: string;
   rows: BenchRow[];
 };
 
@@ -172,7 +173,7 @@ async function benchWebGpu(log: (line: string) => void): Promise<BackendResult> 
   }
 
   canvas.remove();
-  return { backend: "WebGPU", gpu, rows };
+  return { backend: "WebGPU", gpu, browser: navigator.userAgent, rows };
 }
 
 // --- WebGL2: hidden fixed-size canvas + gl.finish() timing ---
@@ -227,7 +228,7 @@ async function benchWebGl(log: (line: string) => void): Promise<BackendResult> {
   }
 
   canvas.remove();
-  return { backend: "WebGL2", gpu, rows };
+  return { backend: "WebGL2", gpu, browser: navigator.userAgent, rows };
 }
 
 // --- Output ---
@@ -236,6 +237,7 @@ function toCsv(result: BackendResult): string {
   const lines = [
     `# backend: ${result.backend}`,
     `# gpu: ${result.gpu}`,
+    `# browser: ${result.browser}`,
     `# resolution: ${BENCH_WIDTH}x${BENCH_HEIGHT}, median of ${TIMED_FRAMES} frames after ${WARMUP_FRAMES} warm-ups`,
     "scale,maxIter,ms,GIterPerSec,MpixPerSec,meanLuma",
   ];

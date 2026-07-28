@@ -1,0 +1,36 @@
+{
+  "title": "FractalFlow: Deep-Zoom Julia Set Explorer",
+  "version": "1.1.0",
+  "upload_type": "software",
+  "description": "Interactive deep-zoom Julia set explorer implementing perturbation rendering across WebGPU/WGSL and native CUDA, with a WebGL2 compatibility backend and independent arbitrary-precision validation.",
+  "creators": [
+    {
+      "name": "Amosov, Timofei"
+    }
+  ],
+  "access_right": "open",
+  "license": "Apache-2.0",
+  "language": "eng",
+  "keywords": [
+    "Julia set",
+    "deep zoom",
+    "perturbation theory",
+    "WebGPU",
+    "WGSL",
+    "CUDA",
+    "double-double arithmetic",
+    "numerical validation"
+  ],
+  "related_identifiers": [
+    {
+      "identifier": "https://github.com/Timmor77/FractalFlow",
+      "relation": "isSupplementTo",
+      "resource_type": "software"
+    },
+    {
+      "identifier": "https://timmor77.github.io/FractalFlow/",
+      "relation": "isAlternateIdentifier",
+      "resource_type": "software"
+    }
+  ]
+}

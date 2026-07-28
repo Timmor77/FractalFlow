@@ -1,0 +1,450 @@
+"""Generate every data-driven figure and table used by the report."""
+
+from __future__ import annotations
+
+import csv
+import hashlib
+import json
+from pathlib import Path
+
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import numpy as np
+from matplotlib.patches import FancyArrowPatch, FancyBboxPatch
+from PIL import Image
+
+
+PAPER = Path(__file__).resolve().parent
+DATA = PAPER / "data"
+FIGURES = PAPER / "figures"
+GENERATED = PAPER / "generated"
+
+COLORS = {
+    "ink": "#172033",
+    "muted": "#667085",
+    "grid": "#d9dce3",
+    "blue": "#2563eb",
+    "green": "#16a34a",
+    "orange": "#ea580c",
+    "purple": "#7c3aed",
+    "light_blue": "#dbeafe",
+    "light_green": "#dcfce7",
+    "light_orange": "#ffedd5",
+    "light_purple": "#ede9fe",
+}
+
+
+def sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def read_benchmark_csv(path: Path) -> list[dict[str, float]]:
+    with path.open(newline="", encoding="utf-8") as stream:
+        lines = [line for line in stream if not line.startswith("#")]
+    return [
+        {
+            "scale": float(row["scale"]),
+            "maxIter": float(row["maxIter"]),
+            "ms": float(row["ms"]),
+            "giter": float(row["GIterPerSec"]),
+            "mpix": float(row["MpixPerSec"]),
+        }
+        for row in csv.DictReader(lines)
+    ]
+
+
+def add_box(
+    ax: plt.Axes,
+    x: float,
+    y: float,
+    width: float,
+    height: float,
+    title: str,
+    subtitle: str,
+    facecolor: str,
+) -> None:
+    box = FancyBboxPatch(
+        (x, y),
+        width,
+        height,
+        boxstyle="round,pad=0.012,rounding_size=0.025",
+        linewidth=1.3,
+        edgecolor=COLORS["ink"],
+        facecolor=facecolor,
+    )
+    ax.add_patch(box)
+    ax.text(
+        x + width / 2,
+        y + height * 0.62,
+        title,
+        ha="center",
+        va="center",
+        fontsize=10,
+        fontweight="bold",
+        color=COLORS["ink"],
+    )
+    ax.text(
+        x + width / 2,
+        y + height * 0.30,
+        subtitle,
+        ha="center",
+        va="center",
+        fontsize=8,
+        color=COLORS["muted"],
+    )
+
+
+def add_arrow(
+    ax: plt.Axes, start: tuple[float, float], end: tuple[float, float], label: str = ""
+) -> None:
+    arrow = FancyArrowPatch(
+        start,
+        end,
+        arrowstyle="-|>",
+        mutation_scale=14,
+        linewidth=1.3,
+        color=COLORS["ink"],
+        connectionstyle="arc3",
+    )
+    ax.add_patch(arrow)
+    if label:
+        ax.text(
+            (start[0] + end[0]) / 2,
+            (start[1] + end[1]) / 2 + 0.035,
+            label,
+            ha="center",
+            fontsize=7.5,
+            color=COLORS["muted"],
+        )
+
+
+def architecture_figure() -> Path:
+    fig, ax = plt.subplots(figsize=(10.4, 3.15))
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    ax.axis("off")
+
+    add_box(
+        ax,
+        0.02,
+        0.57,
+        0.19,
+        0.25,
+        "View state",
+        "DD centre, scale, c",
+        COLORS["light_purple"],
+    )
+    add_box(
+        ax,
+        0.29,
+        0.57,
+        0.22,
+        0.25,
+        "CPU reference orbit",
+        "double-double; D[m] = Z[m] - Z0",
+        COLORS["light_blue"],
+    )
+    add_box(
+        ax,
+        0.60,
+        0.69,
+        0.18,
+        0.22,
+        "WebGPU / WGSL",
+        "f32 pixel deltas",
+        COLORS["light_orange"],
+    )
+    add_box(
+        ax,
+        0.60,
+        0.39,
+        0.18,
+        0.22,
+        "CUDA",
+        "f64 pixel deltas",
+        COLORS["light_green"],
+    )
+    add_box(
+        ax,
+        0.29,
+        0.12,
+        0.22,
+        0.22,
+        "mpmath reference",
+        "direct iteration, 50-80 dps",
+        "#f3f4f6",
+    )
+    add_box(
+        ax,
+        0.84,
+        0.50,
+        0.14,
+        0.26,
+        "Evidence",
+        "PNG, CSV, error metrics",
+        "#fef3c7",
+    )
+
+    add_arrow(ax, (0.21, 0.695), (0.29, 0.695), "once / view")
+    add_arrow(ax, (0.51, 0.695), (0.60, 0.80), "upload")
+    add_arrow(ax, (0.51, 0.66), (0.60, 0.50), "same recurrence")
+    add_arrow(ax, (0.13, 0.57), (0.29, 0.27), "same view")
+    add_arrow(ax, (0.78, 0.80), (0.84, 0.67))
+    add_arrow(ax, (0.78, 0.50), (0.84, 0.59))
+    add_arrow(ax, (0.51, 0.23), (0.84, 0.52))
+
+    ax.text(
+        0.5,
+        0.965,
+        "FractalFlow measurement and validation pipeline",
+        ha="center",
+        va="top",
+        fontsize=12,
+        fontweight="bold",
+        color=COLORS["ink"],
+    )
+    fig.tight_layout(pad=0.4)
+    path = FIGURES / "architecture.pdf"
+    fig.savefig(path, bbox_inches="tight")
+    plt.close(fig)
+    return path
+
+
+def precision_figure() -> Path:
+    scales = np.logspace(-3, -16, 260)
+    center = np.float32(-0.5275031186435346)
+    exact_delta = 0.37 * scales
+
+    absolute_orbit = (
+        np.asarray(np.float32(center.astype(np.float64) + exact_delta), dtype=np.float64)
+        - np.float64(center)
+    )
+    relative_orbit = np.asarray(np.float32(exact_delta), dtype=np.float64)
+
+    absolute_error = np.abs(absolute_orbit - exact_delta) / np.abs(exact_delta)
+    relative_error = np.abs(relative_orbit - exact_delta) / np.abs(exact_delta)
+    relative_error = np.maximum(relative_error, np.finfo(float).tiny)
+
+    fig, ax = plt.subplots(figsize=(7.8, 4.25))
+    ax.plot(
+        scales,
+        absolute_error,
+        color=COLORS["orange"],
+        linewidth=2.2,
+        label=r"absolute f32 orbit: $\mathrm{fl}(Z_0+\delta)-Z_0$",
+    )
+    ax.plot(
+        scales,
+        relative_error,
+        color=COLORS["blue"],
+        linewidth=2.2,
+        label=r"relative f32 orbit: $\mathrm{fl}(\delta)$",
+    )
+    ax.axvline(
+        float(np.spacing(center)),
+        color=COLORS["muted"],
+        linestyle="--",
+        linewidth=1.1,
+        label=r"one f32 ulp near $Z_0$",
+    )
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.invert_xaxis()
+    ax.set_ylim(1e-10, 2)
+    ax.set_xlabel("delta magnitude (deeper zoom to the right)")
+    ax.set_ylabel("relative reconstruction error")
+    ax.grid(True, which="both", color=COLORS["grid"], alpha=0.7)
+    ax.legend(loc="lower right", fontsize=8.5)
+    ax.set_title("Controlled f32 quantization experiment near a repelling fixed point")
+    fig.tight_layout()
+    path = FIGURES / "relative_orbit_precision.pdf"
+    fig.savefig(path)
+    plt.close(fig)
+    return path
+
+
+def validation_figure() -> Path:
+    directory = DATA / "validation"
+    reference_path = directory / "fixed_point_reference.png"
+    cuda_path = directory / "fixed_point_cuda.png"
+    reference = np.asarray(Image.open(reference_path).convert("RGB"))
+    candidate = np.asarray(Image.open(cuda_path).convert("RGB"))
+    diff = np.abs(candidate.astype(np.int16) - reference.astype(np.int16))
+    amplified = np.clip(diff * 32, 0, 255).astype(np.uint8)
+
+    fig, axes = plt.subplots(1, 3, figsize=(9.4, 3.25))
+    panels = [
+        (reference, "mpmath direct iteration"),
+        (candidate, "CUDA perturbation"),
+        (amplified, r"$32\times$ absolute RGB difference"),
+    ]
+    for ax, (image, title) in zip(axes, panels, strict=True):
+        ax.imshow(image, interpolation="nearest")
+        ax.set_title(title, fontsize=9.5)
+        ax.axis("off")
+    fig.suptitle(
+        "Repelling fixed-point case at scale $10^{-10}$ "
+        f"(max channel difference {int(diff.max())}/255)",
+        fontsize=11,
+    )
+    fig.tight_layout(rect=(0, 0, 1, 0.92))
+    path = FIGURES / "validation_fixed_point.pdf"
+    fig.savefig(path, bbox_inches="tight")
+    plt.close(fig)
+    return path
+
+
+def benchmark_figure() -> tuple[Path, dict[str, list[dict[str, float]]]]:
+    directory = DATA / "benchmark"
+    styles = {
+        "webgpu": ("WebGPU (f32 delta)", COLORS["blue"], "s"),
+        "cuda": ("CUDA (f64 delta)", COLORS["green"], "o"),
+    }
+    data = {
+        stem: read_benchmark_csv(directory / f"{stem}_bench.csv")
+        for stem in ("webgpu", "cuda", "cpu")
+    }
+
+    fig, ax = plt.subplots(figsize=(8.2, 4.45))
+    for stem in ("webgpu", "cuda"):
+        label, color, marker = styles[stem]
+        rows = data[stem]
+        ax.plot(
+            [row["scale"] for row in rows],
+            [row["giter"] for row in rows],
+            color=color,
+            marker=marker,
+            markersize=4.5,
+            linewidth=1.9,
+            label=label,
+        )
+
+    cpu_peak = max(row["giter"] for row in data["cpu"])
+    ax.axhline(
+        cpu_peak,
+        color=COLORS["muted"],
+        linestyle="--",
+        linewidth=1.3,
+        label=f"NumPy float64 ({cpu_peak:.3f} GIter/s)",
+    )
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.invert_xaxis()
+    ax.set_xlabel("view scale (deeper zoom to the right)")
+    ax.set_ylabel("upper-bound iteration throughput (GIter/s)")
+    ax.set_title("Measured throughput on one RTX 3060 Ti system, 1920 x 1080")
+    ax.grid(True, which="both", color=COLORS["grid"], alpha=0.7)
+    ax.legend(fontsize=8.8)
+    fig.tight_layout()
+    path = FIGURES / "benchmark_throughput.pdf"
+    fig.savefig(path)
+    plt.close(fig)
+    return path, data
+
+
+def write_validation_table() -> Path:
+    results = DATA / "validation" / "validation_results.csv"
+    with results.open(newline="", encoding="utf-8") as stream:
+        rows = list(csv.DictReader(stream))
+
+    lines = [
+        r"\begin{tabular}{@{}lS[table-format=1.0e-2]S[table-format=1.6]S[table-format=3.2]S[table-format=3.2]@{}}",
+        r"\toprule",
+        r"Case & {Scale} & {Mean error} & {Identical (\%)} & {Within 4 (\%)} \\",
+        r"\midrule",
+    ]
+    for row in rows:
+        label = str(row["label"]).replace("_", r"\_")
+        lines.append(
+            f"{label} & {float(row['scale']):.0e} & "
+            f"{float(row['mean_abs_rgb']):.6f} & "
+            f"{float(row['identical_pixels_pct']):.2f} & "
+            f"{float(row['matching_pixels_le4_pct']):.2f} \\\\"
+        )
+    lines.extend([r"\bottomrule", r"\end{tabular}", ""])
+    path = GENERATED / "validation_table.tex"
+    path.write_text("\n".join(lines), encoding="utf-8")
+    return path
+
+
+def write_benchmark_table(data: dict[str, list[dict[str, float]]]) -> Path:
+    labels = {
+        "webgpu": "WebGPU f32",
+        "cuda": "CUDA f64",
+        "cpu": "NumPy f64",
+    }
+    lines = [
+        r"\begin{tabular}{@{}lS[table-format=4.3]S[table-format=3.1]S[table-format=2.0e-2]@{}}",
+        r"\toprule",
+        r"Backend & {Peak GIter/s} & {Mpix/s} & {Scale} \\",
+        r"\midrule",
+    ]
+    for stem in ("webgpu", "cuda", "cpu"):
+        peak = max(data[stem], key=lambda row: row["giter"])
+        lines.append(
+            f"{labels[stem]} & {peak['giter']:.3f} & {peak['mpix']:.1f} & "
+            f"{peak['scale']:.0e} \\\\"
+        )
+    lines.extend([r"\bottomrule", r"\end{tabular}", ""])
+    path = GENERATED / "benchmark_table.tex"
+    path.write_text("\n".join(lines), encoding="utf-8")
+    return path
+
+
+def write_manifest(inputs: list[Path], outputs: list[Path]) -> Path:
+    manifest = {
+        "generator": "paper/generate_figures.py",
+        "inputs": {
+            str(path.relative_to(PAPER)).replace("\\", "/"): sha256(path)
+            for path in inputs
+        },
+        "outputs": {
+            str(path.relative_to(PAPER)).replace("\\", "/"): sha256(path)
+            for path in outputs
+        },
+    }
+    path = GENERATED / "manifest.json"
+    path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    return path
+
+
+def main() -> None:
+    FIGURES.mkdir(parents=True, exist_ok=True)
+    GENERATED.mkdir(parents=True, exist_ok=True)
+
+    architecture = architecture_figure()
+    precision = precision_figure()
+    validation = validation_figure()
+    benchmark, benchmark_data = benchmark_figure()
+    validation_table = write_validation_table()
+    benchmark_table = write_benchmark_table(benchmark_data)
+
+    inputs = [
+        DATA / "benchmark" / "webgpu_bench.csv",
+        DATA / "benchmark" / "cuda_bench.csv",
+        DATA / "benchmark" / "cpu_bench.csv",
+        DATA / "validation" / "validation_results.csv",
+        DATA / "validation" / "fixed_point_reference.png",
+        DATA / "validation" / "fixed_point_cuda.png",
+    ]
+    outputs = [
+        architecture,
+        precision,
+        validation,
+        benchmark,
+        validation_table,
+        benchmark_table,
+    ]
+    manifest = write_manifest(inputs, outputs)
+    for path in [*outputs, manifest]:
+        print(f"generated {path.relative_to(PAPER)}")
+
+
+if __name__ == "__main__":
+    main()

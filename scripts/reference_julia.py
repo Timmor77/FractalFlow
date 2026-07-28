@@ -128,21 +128,57 @@ def run_cpu_bench(out_path: str) -> None:
 
 
 # Direct iteration in arbitrary precision (mpmath). Slow but valid in deep zoom.
-def render_mpmath(cx_str, cy_str, scale, jcx, jcy, max_iter, W, H, dps) -> np.ndarray:
+def render_mpmath(
+    cx_str,
+    cy_str,
+    scale,
+    jcx,
+    jcy,
+    max_iter,
+    W,
+    H,
+    dps,
+    *,
+    binary64_pixels: bool = False,
+) -> np.ndarray:
     from mpmath import mp, mpf
 
     mp.dps = dps
-    cx, cy, sc = mpf(cx_str), mpf(cy_str), mpf(str(scale))
-    jcx_m, jcy_m = mpf(str(jcx)), mpf(str(jcy))
+    # The measured renderers receive scale and c as IEEE binary64 values.
+    # mpf(float) preserves those exact binary inputs; mpf(str(float)) would
+    # instead validate a nearby ideal decimal (for example exact -0.8), which
+    # can diverge dramatically from the renderer after many iterations near a
+    # repelling point. The centre remains a decimal string because both the
+    # browser and CUDA interfaces accept an extended-precision centre.
+    def centre_value(value):
+        if isinstance(value, tuple):
+            return mpf(value[0]) + mpf(value[1])
+        return mpf(value)
+
+    cx, cy, sc = centre_value(cx_str), centre_value(cy_str), mpf(scale)
+    jcx_m, jcy_m = mpf(jcx), mpf(jcy)
     aspect = mpf(W) / mpf(H)
+    cx_f, cy_f = float(cx), float(cy)
+    scale_f, aspect_f = float(scale), float(W) / float(H)
 
     img = np.zeros((H, W, 3), dtype=np.uint8)
     for y in range(H):
         uy = (mpf(y) + mpf("0.5")) / mpf(H)
         for x in range(W):
             ux = (mpf(x) + mpf("0.5")) / mpf(W)
-            zx = cx + (ux - mpf("0.5")) * aspect * sc
-            zy = cy + (mpf("0.5") - uy) * sc
+            if binary64_pixels:
+                # Match the candidate renderer's declared input coordinates:
+                # CUDA rounds the DD centre to binary64 and performs the
+                # pixel-to-plane mapping in binary64 before perturbation.
+                uvx_f = (float(x) + 0.5) / float(W)
+                uvy_f = (float(y) + 0.5) / float(H)
+                dx_f = (uvx_f - 0.5) * aspect_f * scale_f
+                dy_f = (0.5 - uvy_f) * scale_f
+                zx = mpf(cx_f + dx_f)
+                zy = mpf(cy_f + dy_f)
+            else:
+                zx = cx + (ux - mpf("0.5")) * aspect * sc
+                zy = cy + (mpf("0.5") - uy) * sc
             it, mag2 = max_iter, 0.0
             for i in range(max_iter):
                 x2, y2 = zx * zx, zy * zy

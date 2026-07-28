@@ -1,0 +1,25 @@
+cff-version: 1.2.0
+message: "If you use FractalFlow, please cite the software release and the accompanying technical report."
+title: "FractalFlow: Deep-Zoom Julia Set Explorer"
+type: software
+version: 1.1.0
+date-released: 2026-07-28
+authors:
+  - given-names: Timofei
+    family-names: Amosov
+abstract: >-
+  FractalFlow is an interactive deep-zoom Julia set explorer implementing
+  perturbation rendering across WebGPU/WGSL and native CUDA, with a WebGL2
+  compatibility backend and independent arbitrary-precision validation.
+license: Apache-2.0
+repository-code: "https://github.com/Timmor77/FractalFlow"
+url: "https://timmor77.github.io/FractalFlow/"
+keywords:
+  - Julia set
+  - deep zoom
+  - perturbation theory
+  - WebGPU
+  - WGSL
+  - CUDA
+  - double-double arithmetic
+  - numerical validation
