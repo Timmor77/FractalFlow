@@ -6,6 +6,7 @@
 import { describe, it, expect } from "vitest";
 import { Viewport } from "../src/core/viewport";
 import { ddFromNumber, ddToNumber } from "../src/core/doubleDouble";
+import { VALIDATED_MIN_SCALE } from "../src/core/config";
 
 // Minimal DOMRect stand-in (Viewport only reads left/top/width/height).
 function makeRect(width: number, height: number): DOMRect {
@@ -63,10 +64,10 @@ describe("zoom-at-cursor invariant", () => {
 });
 
 describe("zoom bounds", () => {
-  it("clamps setView scale into [1e-28, 4]", () => {
+  it("clamps setView scale into [VALIDATED_MIN_SCALE, 4]", () => {
     const vp = new Viewport();
     vp.setView(ddFromNumber(0), ddFromNumber(0), 1e-40);
-    expect(vp.scale).toBe(1e-28);
+    expect(vp.scale).toBe(VALIDATED_MIN_SCALE);
     expect(vp.isAtMaxDepth()).toBe(true);
     vp.setView(ddFromNumber(0), ddFromNumber(0), 100);
     expect(vp.scale).toBe(4.0);
@@ -75,7 +76,7 @@ describe("zoom bounds", () => {
   it("reports 'blocked' only when pinned at a bound", () => {
     const vp = new Viewport();
     const rect = makeRect(800, 600);
-    vp.setView(ddFromNumber(0), ddFromNumber(0), 1e-28); // at the min bound
+    vp.setView(ddFromNumber(0), ddFromNumber(0), VALIDATED_MIN_SCALE); // at the min bound
     expect(vp.nudgeZoomByFactor(400, 300, rect, 0.5)).toBe("blocked"); // pushing deeper
     expect(vp.nudgeZoomByFactor(400, 300, rect, 2.0)).toBe("zoom"); // backing off works
   });
@@ -129,7 +130,7 @@ describe("state restore and reset", () => {
     expect(vp.centerX.lo).toBe(1.9e-25);
     expect(vp.centerY.hi).toBe(-0.5);
     expect(vp.centerY.lo).toBe(-3.2e-26);
-    expect(vp.scale).toBe(1e-20);
+    expect(vp.scale).toBe(VALIDATED_MIN_SCALE);
   });
 
   it("reset() restores the initial view, including the zoom target", () => {

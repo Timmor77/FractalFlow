@@ -7,7 +7,7 @@
 import type { Renderer, ViewState, RenderInfo } from "../../core/types";
 import { computeReferenceOrbit } from "../../core/referenceOrbit";
 import { canvasToPng } from "../../core/image";
-import { MAX_ITER_LIMIT, MAX_DPR } from "../../core/config";
+import { MAX_ITER_LIMIT, MAX_DPR, VALIDATED_MIN_SCALE } from "../../core/config";
 
 // The shader is imported as raw text (Vite, ?raw); it stays in its own file.
 import shaderCode from "./julia.wgsl?raw";
@@ -22,9 +22,11 @@ const PALETTE_SIZE = 256;
 export class WebGPURenderer implements Renderer {
   public readonly name = "WebGPU";
 
-  // Perturbation with a double-double reference (~31 digits): comfortable
-  // down to ~1e-28 before the centre precision degrades.
-  public readonly minScale = 1e-28;
+  // Perturbation with a double-double reference (~31 digits). The floor is the
+  // deepest scale the release validates against arbitrary precision, not the
+  // representation's theoretical reach — see core/viewport.ts and the archived
+  // depth sweep.
+  public readonly minScale = VALIDATED_MIN_SCALE;
 
   private readonly canvas: HTMLCanvasElement;
   private readonly device: GPUDevice;

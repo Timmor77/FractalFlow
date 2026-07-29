@@ -127,20 +127,39 @@ def run_cpu_bench(out_path: str) -> None:
     print(f"CSV -> {out_path}")
 
 
+# How much of the iteration cap is actually used? The GIter/s convention used by
+# every backend charges W*H*maxIter iterations per frame, but pixels stop at
+# escape. This measures the real escape times of the benchmark views by direct
+# float64 iteration (valid at these depths) and reports two averages:
+#   - mean iterations per pixel: the useful work;
+#   - mean over 32-pixel groups of the group maximum: what the hardware really
+#     issues, since a SIMT group runs as long as its slowest lane. Two plausible
+#     group shapes are reported (16x2 = a warp of a 16x16 CUDA block, 8x4 = a
+#     typical fragment-shader quad group); the answer barely depends on which.
+def run_escape_stats(out_path: str) -> None:
+    W, H = 1920, 1080
+    cx, cy, jcx, jcy = 0.76, 0.24, -0.8, 0.156  # same view as the GPU benchmarks
+    points = [(0, 3.0, 300), (6, 3e-6, 4000), (12, 3e-12, 4000)]
+
+    os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+    with open(out_path, "w") as f:
+        f.write("# direct float64 escape times for the benchmark view, 1920x1080\n")
+        f.write("k,scale,maxIter,meanIter,meanIterFrac,group16x2Frac,group8x4Frac\n")
+        for k, scale, max_iter in points:
+            it, _ = iterate_numpy(cx, cy, scale, jcx, jcy, max_iter, W, H)
+            g16 = it.reshape(H // 2, 2, W // 16, 16).max(axis=(1, 3)).mean()
+            g8 = it.reshape(H // 4, 4, W // 8, 8).max(axis=(1, 3)).mean()
+            mean = it.mean()
+            print(f"k={k:2d} scale={scale:.0e} cap={max_iter}: mean={mean:.1f} "
+                  f"({mean / max_iter:.1%} of cap), group16x2={g16 / max_iter:.1%}, "
+                  f"group8x4={g8 / max_iter:.1%}")
+            f.write(f"{k},{scale:.6e},{max_iter},{mean:.2f},{mean / max_iter:.5f},"
+                    f"{g16 / max_iter:.5f},{g8 / max_iter:.5f}\n")
+    print(f"CSV -> {out_path}")
+
+
 # Direct iteration in arbitrary precision (mpmath). Slow but valid in deep zoom.
-def render_mpmath(
-    cx_str,
-    cy_str,
-    scale,
-    jcx,
-    jcy,
-    max_iter,
-    W,
-    H,
-    dps,
-    *,
-    binary64_pixels: bool = False,
-) -> np.ndarray:
+def render_mpmath(cx_str, cy_str, scale, jcx, jcy, max_iter, W, H, dps) -> np.ndarray:
     from mpmath import mp, mpf
 
     mp.dps = dps
@@ -158,27 +177,20 @@ def render_mpmath(
     cx, cy, sc = centre_value(cx_str), centre_value(cy_str), mpf(scale)
     jcx_m, jcy_m = mpf(jcx), mpf(jcy)
     aspect = mpf(W) / mpf(H)
-    cx_f, cy_f = float(cx), float(cy)
-    scale_f, aspect_f = float(scale), float(W) / float(H)
 
+    # Pixel starting points: full double-double centre plus the exact screen
+    # offset. This is what the candidate renderers effectively iterate — their
+    # reference orbit is stored relative to the DD centre, so the centre is
+    # never rounded into the pixel coordinate — and it stays meaningful below
+    # the binary64 floor, where a rounded centre would collapse whole rows of
+    # pixels onto the same start.
     img = np.zeros((H, W, 3), dtype=np.uint8)
     for y in range(H):
         uy = (mpf(y) + mpf("0.5")) / mpf(H)
         for x in range(W):
             ux = (mpf(x) + mpf("0.5")) / mpf(W)
-            if binary64_pixels:
-                # Match the candidate renderer's declared input coordinates:
-                # CUDA rounds the DD centre to binary64 and performs the
-                # pixel-to-plane mapping in binary64 before perturbation.
-                uvx_f = (float(x) + 0.5) / float(W)
-                uvy_f = (float(y) + 0.5) / float(H)
-                dx_f = (uvx_f - 0.5) * aspect_f * scale_f
-                dy_f = (0.5 - uvy_f) * scale_f
-                zx = mpf(cx_f + dx_f)
-                zy = mpf(cy_f + dy_f)
-            else:
-                zx = cx + (ux - mpf("0.5")) * aspect * sc
-                zy = cy + (mpf("0.5") - uy) * sc
+            zx = cx + (ux - mpf("0.5")) * aspect * sc
+            zy = cy + (mpf("0.5") - uy) * sc
             it, mag2 = max_iter, 0.0
             for i in range(max_iter):
                 x2, y2 = zx * zx, zy * zy
@@ -189,6 +201,28 @@ def render_mpmath(
                 zx, zy = x2 - y2 + jcx_m, 2 * zx * zy + jcy_m
             img[y, x] = color(it, mag2, max_iter)
     return img
+
+
+# CI-friendly self-check: the two CPU paths (vectorized float64 and arbitrary
+# precision) must agree on a shallow view. They share only the colouring
+# function, so a mismatch means the pixel mapping, the escape test or the
+# palette drifted — the same code the GPU backends are validated against. No GPU
+# and no CUDA toolkit required, which is what makes it runnable in CI.
+def run_selftest() -> int:
+    W = H = 32
+    cx, cy, scale, jcx, jcy, max_iter = 0.76, 0.24, 0.3, -0.8, 0.156, 300
+    fast = render_numpy(cx, cy, scale, jcx, jcy, max_iter, W, H)
+    exact = render_mpmath(cx, cy, scale, jcx, jcy, max_iter, W, H, 40)
+    diff = np.abs(fast.astype(np.int32) - exact.astype(np.int32))
+    worse_than_four = int((diff.max(axis=2) > 4).sum())
+    print(f"self-check {W}x{H}: mean={diff.mean():.4f}/255, max={diff.max()}/255, "
+          f"pixels worse than 4 levels: {worse_than_four}/{W * H}")
+    # float64 and mpmath disagree only where the escape time is chaotic; a
+    # systematic break moves far more than a couple of boundary pixels.
+    if diff.mean() >= 1.0 or worse_than_four > 4:
+        print("ERROR: the float64 and arbitrary-precision paths disagree")
+        return 1
+    return 0
 
 
 def main() -> None:
@@ -208,10 +242,22 @@ def main() -> None:
     p.add_argument("--compare", default=None, help="GPU PNG to compare against (same view)")
     p.add_argument("--bench", action="store_true",
                    help="time the numpy iteration (CPU baseline) and write artifacts/cpu_bench.csv")
+    p.add_argument("--escape-stats", action="store_true",
+                   help="measure how much of the iteration cap the benchmark views really use "
+                        "and write paper/data/benchmark/escape_stats.csv (several minutes)")
+    p.add_argument("--selftest", action="store_true",
+                   help="check the float64 and mpmath paths against each other (CI, no GPU)")
     args = p.parse_args()
+
+    if args.selftest:
+        raise SystemExit(run_selftest())
 
     if args.bench:
         run_cpu_bench("artifacts/cpu_bench.csv")
+        return
+
+    if args.escape_stats:
+        run_escape_stats("paper/data/benchmark/escape_stats.csv")
         return
 
     use_numpy = args.fast and not args.hp

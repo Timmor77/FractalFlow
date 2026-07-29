@@ -2,18 +2,18 @@
   "generator": "paper/generate_figures.py",
   "inputs": {
     "data/benchmark/webgpu_bench.csv": "ebbc8377be2a3625069a72029a2a0441d0f4f558a88ca4e4e4e3924ac14739fc",
-    "data/benchmark/cuda_bench.csv": "dd63659e659aacbb8b6a30e154df789a5e02bf6449cbe1253e99dc236a612206",
+    "data/benchmark/cuda_bench.csv": "63e394aa64a7f68da0d0716ec386196f06642129aa84a7230585b79949e6c6eb",
     "data/benchmark/cpu_bench.csv": "fe30d4e17fb04de169c9cdc2db07fd8ed62e2cfaa30856b26c7f452de128f0b6",
-    "data/validation/validation_results.csv": "ffc1d5acea359b11555cbcdea752615b967f532cca30fcf55408d1a23a754a75",
-    "data/validation/fixed_point_reference.png": "a0df62138a6c260713049a5180e3ae9cfaf313e8048fe04df7f1705990ffc1fb",
-    "data/validation/fixed_point_cuda.png": "d014caa9030c5aad576626316eff82c25299c6ce253a1eaac37b22fe061a9e60"
+    "data/validation/validation_results.csv": "45f18cdad25d42e1267ec5d388c784640be8a89a70a6ca49a6a4d8bfb69d76ac",
+    "data/validation/fixed_point_reference.png": "1daa380ac89e4aa5e7894632b2d790f6e848bb63b3c071c9dff57fbdf7b107f4",
+    "data/validation/fixed_point_cuda.png": "03b3dd47f315b66d3bb071c490bd1c3b6084aa3bbf62e935f1cd712d700a1b90"
   },
   "outputs": {
-    "figures/architecture.pdf": "a4df235a0747fc882d7f39e344831f8d4d273ec3ab3a5588a0f4f85d36bef7c2",
-    "figures/relative_orbit_precision.pdf": "17238d7c587547828ac52c8227359f584c46e1ebdf46125fdfec6753c093bbfe",
-    "figures/validation_fixed_point.pdf": "16c8cbb36fddb142470f49ec6547ec95cafdba44abda5fc780425ac2c449bf71",
-    "figures/benchmark_throughput.pdf": "f950f800e245ce1fd62cce39567276b77da221589a6cdd581e8032e15a975388",
-    "generated/validation_table.tex": "9e31c0ef3eb3445d73b58153c1a9a9f039b2a9c2d49de2b7bc600ce0dd14ab5d",
-    "generated/benchmark_table.tex": "5ad9492351dc38fb6e36cf8e680231d495f2c95f2b0d6e4a6db939b4eda16ba1"
+    "figures/architecture.pdf": "ac552d8db0b66a2d2c246b8d96e1f0550c2101ffaf42c42355f9f90c56ba38ff",
+    "figures/relative_orbit_precision.pdf": "9cd74ed415ad0a6a810fbf6aa0cb2283e57e07642ceefb11b8a7ef8fdd205e8b",
+    "figures/validation_fixed_point.pdf": "685b43e1726a4bae95b0cc6886bf08b734aea4e514edd1726d85a6b0630fae05",
+    "figures/benchmark_throughput.pdf": "a1825fd4af3843747bf79eb43a9f1a0d75d9e6f6e9b478349660af8f6fe8c0e9",
+    "generated/validation_table.tex": "26bc828eced7c8b50f7ec4e250ba7e078912c16fb4d18ec370398170364a4e4e",
+    "generated/benchmark_table.tex": "2a4635c1f2bfec595f43d459c29daf439c32dbea29004ed12eeebe9274bcc7ff"
   }
 }

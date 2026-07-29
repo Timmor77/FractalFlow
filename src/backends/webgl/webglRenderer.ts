@@ -1,15 +1,34 @@
-// WebGL2 render backend (FALLBACK).
+// WebGL2 render backend (COMPATIBILITY FALLBACK).
 //
 // Used only when WebGPU is unavailable (older Safari/iOS, old GPUs). It
 // iterates z = z² + c directly in the fragment shader with "double-single"
-// arithmetic (each number = vec2(hi, lo)). No perturbation here: it is simpler
-// and works everywhere, but the zoom tops out around 1e-14. The WebGPU version
-// goes much deeper.
+// arithmetic (each number = vec2(hi, lo)) — no perturbation, no reference
+// orbit. Simple and portable, but shallow: the representation tops out near a
+// view scale of 1e-14, and only on drivers that compile the compensated sums as
+// written. The constructor probes for that (see probe.frag.glsl) and lowers the
+// zoom floor to plain-f32 territory when the probe fails, so the camera never
+// pretends to a depth this backend cannot render.
+//
+// This path is a compatibility preview, not part of the validated deep-zoom
+// pipeline: its output is not in the release validation matrix and its timings
+// are not reported as benchmark evidence.
 
 import type { Renderer, ViewState, RenderInfo } from "../../core/types";
 import { ddToNumber } from "../../core/doubleDouble";
 import { canvasToPng } from "../../core/image";
 import { MAX_ITER_LIMIT, MAX_DPR } from "../../core/config";
+import vertexShaderSource from "./julia.vert.glsl?raw";
+import fragmentShaderSource from "./julia.frag.glsl?raw";
+import probeShaderSource from "./probe.frag.glsl?raw";
+
+// Zoom floor when the driver keeps the error-free transformations: the
+// double-single representation itself dies around 1e-14, so stop just above it.
+const DS_MIN_SCALE = 1e-13;
+
+// Zoom floor when the probe shows the compensated arithmetic was optimised
+// away: the shader is then effectively plain f32, whose ~1e-7 spacing around
+// |z| = 1 stops separating pixels a little below 1e-4.
+const F32_MIN_SCALE = 1e-4;
 
 // Splits a float64 into float32 hi + remainder lo (double-single representation).
 function splitNumber(value: number): { high: number; low: number } {
@@ -17,119 +36,6 @@ function splitNumber(value: number): { high: number; low: number } {
   return { high, low: value - high };
 }
 
-const vertexShaderSource = `#version 300 es
-precision highp float;
-in vec2 a_position;
-void main() {
-  gl_Position = vec4(a_position, 0.0, 1.0);
-}
-`;
-
-// Fragment shader: Julia in double-single arithmetic (vec2 hi/lo).
-const fragmentShaderSource = `#version 300 es
-precision highp float;
-
-uniform vec2 u_resolution;
-uniform vec2 u_centerHigh; // (centerX.hi, centerY.hi)
-uniform vec2 u_centerLow;  // (centerX.lo, centerY.lo)
-uniform vec2 u_scaleDS;    // (scale.hi, scale.lo)
-uniform vec2 u_cHigh;      // (cx.hi, cy.hi)
-uniform vec2 u_cLow;       // (cx.lo, cy.lo)
-uniform int u_maxIter;
-
-// Palette colour lookup table (256×1 LUT), sampled by the smooth iteration
-// count. Texture in "repeat" mode -> cyclic colouring.
-uniform sampler2D u_lut;
-
-out vec4 outColor;
-
-// --- Double-single primitives (a = vec2(hi, lo)) ---
-vec2 twoSum(float a, float b) {
-  float s = a + b;
-  float bb = s - a;
-  return vec2(s, (a - (s - bb)) + (b - bb));
-}
-vec2 quickTwoSum(float a, float b) {
-  float s = a + b;
-  return vec2(s, b - (s - a));
-}
-vec2 splitFloat(float a) {
-  float t = 4097.0 * a; // 2^12 + 1, suited to 24-bit mantissas
-  float hi = t - (t - a);
-  return vec2(hi, a - hi);
-}
-vec2 twoProd(float a, float b) {
-  float p = a * b;
-  vec2 as = splitFloat(a);
-  vec2 bs = splitFloat(b);
-  return vec2(p, ((as.x * bs.x - p) + as.x * bs.y + as.y * bs.x) + as.y * bs.y);
-}
-vec2 dsAdd(vec2 a, vec2 b) {
-  vec2 s = twoSum(a.x, b.x);
-  return quickTwoSum(s.x, s.y + a.y + b.y);
-}
-vec2 dsSub(vec2 a, vec2 b) { return dsAdd(a, vec2(-b.x, -b.y)); }
-vec2 dsMul(vec2 a, vec2 b) {
-  vec2 p = twoProd(a.x, b.x);
-  p.y += a.x * b.y + a.y * b.x;
-  return quickTwoSum(p.x, p.y);
-}
-vec2 dsMulFloat(vec2 a, float b) {
-  vec2 p = twoProd(a.x, b);
-  p.y += a.y * b;
-  return quickTwoSum(p.x, p.y);
-}
-float dsToFloat(vec2 a) { return a.x + a.y; }
-
-void main() {
-  vec2 uv = gl_FragCoord.xy / u_resolution;
-  vec2 p = uv - 0.5;
-  p.x *= u_resolution.x / u_resolution.y;
-
-  // Screen offset -> complex plane, in double-single.
-  vec2 offsetX = dsMulFloat(u_scaleDS, p.x);
-  vec2 offsetY = dsMulFloat(u_scaleDS, p.y);
-
-  vec2 zRe = dsAdd(vec2(u_centerHigh.x, u_centerLow.x), offsetX);
-  vec2 zIm = dsAdd(vec2(u_centerHigh.y, u_centerLow.y), offsetY);
-
-  vec2 cRe = vec2(u_cHigh.x, u_cLow.x);
-  vec2 cIm = vec2(u_cHigh.y, u_cLow.y);
-
-  int iter = 0;
-  float mag2 = 0.0;
-  bool escaped = false;
-
-  // Constant bound required by WebGL2, strictly > MAX_ITER_LIMIT (TypeScript).
-  for (int i = 0; i < 4096; i++) {
-    if (i >= u_maxIter) { break; }
-
-    // z² = (x² - y²) + i(2xy)
-    vec2 x2 = dsMul(zRe, zRe);
-    vec2 y2 = dsMul(zIm, zIm);
-    vec2 xy = dsMul(zRe, zIm);
-    zRe = dsAdd(dsSub(x2, y2), cRe);
-    zIm = dsAdd(dsMulFloat(xy, 2.0), cIm);
-
-    float zr = dsToFloat(zRe);
-    float zi = dsToFloat(zIm);
-    mag2 = zr * zr + zi * zi;
-    if (mag2 > 4.0) { iter = i; escaped = true; break; }
-  }
-
-  if (!escaped) {
-    outColor = vec4(0.0, 0.0, 0.0, 1.0);
-    return;
-  }
-
-  // Smooth colouring, consistent with the WebGPU backend (samples the LUT).
-  // Log-damped colour density — see julia.wgsl for the rationale.
-  float nu = log2(0.5 * log2(mag2));
-  float smoothIter = float(iter) + 1.0 - nu;
-  float t = 5.545 * log2(1.0 + smoothIter / 400.0);
-  outColor = vec4(texture(u_lut, vec2(t, 0.5)).rgb, 1.0);
-}
-`;
 
 function createShader(gl: WebGL2RenderingContext, type: number, source: string): WebGLShader {
   const shader = gl.createShader(type);
@@ -146,9 +52,9 @@ function createShader(gl: WebGL2RenderingContext, type: number, source: string):
   return shader;
 }
 
-function createProgram(gl: WebGL2RenderingContext): WebGLProgram {
+function createProgram(gl: WebGL2RenderingContext, fragmentSource: string): WebGLProgram {
   const vs = createShader(gl, gl.VERTEX_SHADER, vertexShaderSource);
-  const fs = createShader(gl, gl.FRAGMENT_SHADER, fragmentShaderSource);
+  const fs = createShader(gl, gl.FRAGMENT_SHADER, fragmentSource);
   const program = gl.createProgram();
   if (!program) {
     throw new Error("Failed to create WebGL program");
@@ -174,15 +80,60 @@ function getUniform(gl: WebGL2RenderingContext, program: WebGLProgram, name: str
   return location;
 }
 
+// Runs probe.frag.glsl on a 1×1 target: true when the driver preserves the
+// rounding residual of twoSum, false when it compiles the compensated sum away.
+// A driver that fails this cannot render the deep views the double-single
+// coordinates promise, so the caller lowers the zoom floor instead of producing
+// a plausible-looking wrong image. Called once, at construction.
+function probeCompensatedArithmetic(gl: WebGL2RenderingContext): boolean {
+  const program = createProgram(gl, probeShaderSource);
+  const texture = gl.createTexture();
+  const framebuffer = gl.createFramebuffer();
+  try {
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+    if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
+      return true; // cannot probe: keep the representation's own limit
+    }
+
+    // The vertex buffer and VAO of the caller are still bound; the probe program
+    // needs its own attribute binding because the location may differ.
+    const positionLocation = gl.getAttribLocation(program, "a_position");
+    gl.enableVertexAttribArray(positionLocation);
+    gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
+
+    gl.viewport(0, 0, 1, 1);
+    gl.useProgram(program);
+    // 1 + 1e-8 rounds back to 1 in f32, so the whole information is in the
+    // residual. Passed as a uniform to defeat constant folding.
+    gl.uniform2f(getUniform(gl, program, "u_probe"), 1.0, 1e-8);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+    const pixel = new Uint8Array(4);
+    gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
+    return pixel[0] > 128;
+  } finally {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.deleteFramebuffer(framebuffer);
+    gl.deleteTexture(texture);
+    gl.deleteProgram(program);
+  }
+}
+
 export class WebGLRenderer implements Renderer {
   public readonly name = "WebGL2";
 
-  // Double-single arithmetic tops out around 1e-14; keep a margin. Some
-  // mobile GPU drivers compile the error-free transforms with fast-math and
-  // collapse them to plain f32 (~1e-5): nothing we can detect from here, but
-  // this floor at least stops the zoom at the fallback's theoretical limit
-  // instead of pretending to reach 1e-28.
-  public readonly minScale = 1e-13;
+  // Zoom floor, decided by the start-up probe: the double-single limit when the
+  // driver keeps the compensated arithmetic, the plain-f32 limit when it does
+  // not. Never 1e-28 — that is the WebGPU perturbation path.
+  public readonly minScale: number;
+
+  // Probe result, surfaced for the benchmark page and the UI message.
+  public readonly compensatedArithmetic: boolean;
 
   private readonly canvas: HTMLCanvasElement;
   private readonly gl: WebGL2RenderingContext;
@@ -213,7 +164,7 @@ export class WebGLRenderer implements Renderer {
       throw new Error("WebGL2 is not supported by this browser");
     }
     this.gl = gl;
-    this.program = createProgram(gl);
+    this.program = createProgram(gl, fragmentShaderSource);
 
     // Two fullscreen triangles.
     const positionLocation = gl.getAttribLocation(this.program, "a_position");
@@ -251,6 +202,17 @@ export class WebGLRenderer implements Renderer {
     // Safety check: the shader loop bound (4096) must stay > the iteration cap.
     if (MAX_ITER_LIMIT >= 4096) {
       throw new Error("The WebGL2 shader loop bound (4096) is too low");
+    }
+
+    // Ask the driver what its compiler actually kept, then set the zoom floor
+    // to a depth this backend can really render.
+    this.compensatedArithmetic = probeCompensatedArithmetic(gl);
+    this.minScale = this.compensatedArithmetic ? DS_MIN_SCALE : F32_MIN_SCALE;
+    if (!this.compensatedArithmetic) {
+      console.warn(
+        "WebGL2: this driver optimises the compensated (double-single) arithmetic away; " +
+          `zoom limited to ${F32_MIN_SCALE.toExponential(0)} instead of ${DS_MIN_SCALE.toExponential(0)}.`,
+      );
     }
 
     this.resize();

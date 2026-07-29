@@ -11,6 +11,13 @@ export const BASE_MAX_ITER = 300;
 // buffer). 4000 is plenty for the targeted zoom depth.
 export const MAX_ITER_LIMIT = 4000;
 
+// Zoom floor of the perturbation backends: the deepest view the release
+// validates pixel-for-pixel against arbitrary precision (case
+// "deepest_validated", paper/data/validation). The double-double centre could
+// address deeper, but the archived sweep shows the rendering drifting there, so
+// camera and backends share this number rather than the representation's reach.
+export const VALIDATED_MIN_SCALE = 1e-20;
+
 // Iterations added per zoom level (1 level = ×2). The deeper the zoom, the more
 // iterations are needed to resolve the structure.
 const ITER_PER_ZOOM_LEVEL = 45;

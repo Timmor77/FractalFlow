@@ -1,0 +1,12 @@
+# backend: WebGPU (f32 deltas) vs the mpmath references in paper/data/validation/
+# browser: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Claude/1.24012.9 Chrome/148.0.7778.280 Electron/42.7.0 Safari/537.36 MSIX
+# adapter: nvidia / ampere (RTX 3060 Ti)
+# regenerate: npm run dev, then open /?validate
+# differingPixels/worseThan4 include the palette LUT sampling difference; interiorFlips do not
+id,scale,maxIter,meanAbsRgb,maxAbsRgb,differingPixels,worseThan4,interiorFlips,pixels
+overview,3.000000e+00,300,1.213379,244,3768,40,14,4096
+off_center,3.000000e-01,1100,8.736979,254,3918,441,2,4096
+deep_zoom,1.000000e-05,700,1.623698,210,4096,2,0,4096
+fixed_point,1.000000e-10,400,0.492920,12,2736,2,0,4096
+below_binary64,1.000000e-16,700,1.715495,252,3422,111,39,4096
+deepest_validated,1.000000e-20,1200,10.496908,255,3976,533,86,4096

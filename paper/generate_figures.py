@@ -1,4 +1,8 @@
-"""Generate every data-driven figure and table used by the report."""
+"""Generate every data-driven figure and table used by the report.
+
+Figures are written without a PDF creation date so that a re-run on unchanged
+inputs reproduces the byte-identical files listed in generated/manifest.json.
+"""
 
 from __future__ import annotations
 
@@ -20,6 +24,9 @@ PAPER = Path(__file__).resolve().parent
 DATA = PAPER / "data"
 FIGURES = PAPER / "figures"
 GENERATED = PAPER / "generated"
+
+# Suppresses the timestamp the PDF backend would otherwise embed.
+NO_DATE = {"CreationDate": None}
 
 COLORS = {
     "ink": "#172033",
@@ -211,7 +218,7 @@ def architecture_figure() -> Path:
     )
     fig.tight_layout(pad=0.4)
     path = FIGURES / "architecture.pdf"
-    fig.savefig(path, bbox_inches="tight")
+    fig.savefig(path, bbox_inches="tight", metadata=NO_DATE)
     plt.close(fig)
     return path
 
@@ -264,7 +271,7 @@ def precision_figure() -> Path:
     ax.set_title("Controlled f32 quantization experiment near a repelling fixed point")
     fig.tight_layout()
     path = FIGURES / "relative_orbit_precision.pdf"
-    fig.savefig(path)
+    fig.savefig(path, metadata=NO_DATE)
     plt.close(fig)
     return path
 
@@ -295,7 +302,7 @@ def validation_figure() -> Path:
     )
     fig.tight_layout(rect=(0, 0, 1, 0.92))
     path = FIGURES / "validation_fixed_point.pdf"
-    fig.savefig(path, bbox_inches="tight")
+    fig.savefig(path, bbox_inches="tight", metadata=NO_DATE)
     plt.close(fig)
     return path
 
@@ -343,9 +350,19 @@ def benchmark_figure() -> tuple[Path, dict[str, list[dict[str, float]]]]:
     ax.legend(fontsize=8.8)
     fig.tight_layout()
     path = FIGURES / "benchmark_throughput.pdf"
-    fig.savefig(path)
+    fig.savefig(path, metadata=NO_DATE)
     plt.close(fig)
     return path, data
+
+
+def tex_scale(value: float) -> str:
+    """Format a view scale as maths: 3e-06 -> $3{\\times}10^{-6}$, 3.0 -> $3$."""
+    exponent = int(f"{value:e}".split("e")[1])
+    mantissa = value / 10.0**exponent
+    head = "" if abs(mantissa - 1.0) < 1e-9 else f"{mantissa:g}{{\\times}}"
+    if exponent == 0:
+        return f"${mantissa:g}$" if head else "$1$"
+    return f"${head}10^{{{exponent}}}$"
 
 
 def write_validation_table() -> Path:
@@ -354,18 +371,24 @@ def write_validation_table() -> Path:
         rows = list(csv.DictReader(stream))
 
     lines = [
-        r"\begin{tabular}{@{}lS[table-format=1.0e-2]S[table-format=1.6]S[table-format=3.2]S[table-format=3.2]@{}}",
+        r"\begin{tabular}{@{}lrrrrrr@{}}",
         r"\toprule",
-        r"Case & {Scale} & {Mean error} & {Identical (\%)} & {Within 4 (\%)} \\",
+        r"Case & Scale & Iter.\ cap & Mean error & Max error "
+        r"& Pixels differing & By $>4$ \\",
         r"\midrule",
     ]
     for row in rows:
         label = str(row["label"]).replace("_", r"\_")
+        pixels = int(row["width"]) * int(row["height"])
+        # The CSV stores percentages; for a 64x64 case the pixel counts are the
+        # readable form, and the conversion is exact.
+        differing = round(pixels * (100.0 - float(row["identical_pixels_pct"])) / 100.0)
+        above_four = round(pixels * (100.0 - float(row["matching_pixels_le4_pct"])) / 100.0)
         lines.append(
-            f"{label} & {float(row['scale']):.0e} & "
+            f"{label} & {tex_scale(float(row['scale']))} & {int(row['max_iter'])} & "
             f"{float(row['mean_abs_rgb']):.6f} & "
-            f"{float(row['identical_pixels_pct']):.2f} & "
-            f"{float(row['matching_pixels_le4_pct']):.2f} \\\\"
+            f"{int(float(row['max_abs_rgb']))} & "
+            f"{differing} & {above_four} \\\\"
         )
     lines.extend([r"\bottomrule", r"\end{tabular}", ""])
     path = GENERATED / "validation_table.tex"
@@ -380,16 +403,16 @@ def write_benchmark_table(data: dict[str, list[dict[str, float]]]) -> Path:
         "cpu": "NumPy f64",
     }
     lines = [
-        r"\begin{tabular}{@{}lS[table-format=4.3]S[table-format=3.1]S[table-format=2.0e-2]@{}}",
+        r"\begin{tabular}{@{}lrrrr@{}}",
         r"\toprule",
-        r"Backend & {Peak GIter/s} & {Mpix/s} & {Scale} \\",
+        r"Backend & Peak GIter/s & Mpix/s & Frame (ms) & Scale \\",
         r"\midrule",
     ]
     for stem in ("webgpu", "cuda", "cpu"):
         peak = max(data[stem], key=lambda row: row["giter"])
         lines.append(
             f"{labels[stem]} & {peak['giter']:.3f} & {peak['mpix']:.1f} & "
-            f"{peak['scale']:.0e} \\\\"
+            f"{peak['ms']:.1f} & {tex_scale(peak['scale'])} \\\\"
         )
     lines.extend([r"\bottomrule", r"\end{tabular}", ""])
     path = GENERATED / "benchmark_table.tex"

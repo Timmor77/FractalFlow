@@ -1,0 +1,5 @@
+# direct float64 escape times for the benchmark view, 1920x1080
+k,scale,maxIter,meanIter,meanIterFrac,group16x2Frac,group8x4Frac
+0,3.000000e+00,300,14.59,0.04862,0.10894,0.10206
+6,3.000000e-06,4000,159.03,0.03976,0.07155,0.06943
+12,3.000000e-12,4000,838.53,0.20963,0.29602,0.29050

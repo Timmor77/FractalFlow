@@ -17,3 +17,13 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm test
+
+  reference-selftest:
+    # The GPU paths cannot run here, but the CPU reference they are validated
+    # against can: this catches a drift in the pixel mapping, the escape test or
+    # the colouring before it silently invalidates the release matrix.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv run python scripts/reference_julia.py --selftest

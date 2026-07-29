@@ -66,8 +66,9 @@ async function startApp(): Promise<void> {
   const renderer = await createRenderer();
 
   // Zoom floor matched to the backend's real precision: the WebGL2 fallback
-  // pixelates around 1e-13 (worse on some mobile drivers), so letting the
-  // camera go to 1e-28 there would only zoom into mush.
+  // pixelates around 1e-13 — or as early as 1e-4 when its start-up probe finds
+  // the compensated arithmetic optimised away — so letting the camera reach the
+  // perturbation floor there would only zoom into mush.
   viewport.setMinScale(renderer.minScale);
 
   let rafId: number | null = null;
@@ -440,12 +441,17 @@ async function startApp(): Promise<void> {
   }
 }
 
-// `?bench` runs the benchmark harness instead of the app. The dynamic import
-// keeps the harness out of the main chunk.
-const benchMode = new URLSearchParams(location.search).get("bench");
+// `?bench` runs the benchmark harness and `?validate` the WebGPU-vs-reference
+// comparison, instead of the app. The dynamic imports keep both out of the main
+// chunk.
+const params = new URLSearchParams(location.search);
+const benchMode = params.get("bench");
 if (benchMode !== null) {
   const { runBench } = await import("./bench/bench");
   await runBench(benchMode);
+} else if (params.has("validate")) {
+  const { runValidation } = await import("./bench/validate");
+  await runValidation();
 } else {
   await startApp();
 }

@@ -56,7 +56,8 @@ fn fs(@builtin(position) fragCoord : vec4f) -> @location(0) vec4f {
   p.y = -p.y;
 
   // Initial δ = pixel offset from the centre = p * scale.
-  // Even at extreme zoom (scale ~1e-28), this small value stays representable in f32.
+  // Even at extreme zoom (scale ~1e-20), this small value stays representable in
+  // f32, whose normals reach down to ~1e-38: only the exponent moves.
   var d = p * u.scale;
 
   var m : u32 = 0u;          // index into the reference orbit

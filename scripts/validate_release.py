@@ -121,11 +121,18 @@ def compare_images(reference_path: Path, candidate_path: Path) -> dict[str, floa
 
     diff = np.abs(candidate - reference)
     per_pixel_max = diff.max(axis=2)
+    # Interior pixels are painted pure black by every backend, so a pixel that is
+    # black on one side and coloured on the other is an escaped/not-escaped
+    # disagreement rather than a colour rounding difference. It is the one error
+    # a mean cannot see, and the one that matters most.
+    interior_reference = (reference == 0).all(axis=2)
+    interior_candidate = (candidate == 0).all(axis=2)
     return {
         "mean_abs_rgb": float(diff.mean()),
         "max_abs_rgb": int(diff.max()),
         "identical_pixels_pct": float((per_pixel_max == 0).mean() * 100.0),
         "matching_pixels_le4_pct": float((per_pixel_max <= 4).mean() * 100.0),
+        "interior_flips_pct": float((interior_reference != interior_candidate).mean() * 100.0),
     }
 
 
@@ -149,7 +156,6 @@ def render_case(case: dict[str, object], cuda_exe: Path, out_dir: Path) -> dict[
         width,
         height,
         int(case["dps"]),
-        binary64_pixels=True,
     )
     Image.fromarray(reference).save(reference_path)
 
@@ -191,6 +197,82 @@ def render_case(case: dict[str, object], cuda_exe: Path, out_dir: Path) -> dict[
     }
 
 
+# Release gate. A mean alone is far too forgiving on a 4096-pixel image: a
+# handful of completely wrong pixels barely moves it. These three thresholds
+# each catch a different failure — a global colour shift, a scattering of wrong
+# pixels, and escaped/not-escaped flips, which are the ones a broken rebasing
+# step produces.
+MAX_MEAN_ABS_RGB = 3.0
+MAX_WORSE_THAN_4_PCT = 1.0
+MAX_INTERIOR_FLIPS_PCT = 0.5
+
+
+def check_thresholds(rows: list[dict[str, object]]) -> list[str]:
+    failures: list[str] = []
+    for row in rows:
+        case = row["id"]
+        mean = float(row["mean_abs_rgb"])
+        worse_than_four = 100.0 - float(row["matching_pixels_le4_pct"])
+        flips = float(row["interior_flips_pct"])
+        if mean >= MAX_MEAN_ABS_RGB:
+            failures.append(f"{case}: mean {mean:.3f} >= {MAX_MEAN_ABS_RGB} RGB levels")
+        if worse_than_four > MAX_WORSE_THAN_4_PCT:
+            failures.append(
+                f"{case}: {worse_than_four:.2f}% of pixels differ by more than 4 levels "
+                f"(limit {MAX_WORSE_THAN_4_PCT}%)"
+            )
+        if flips > MAX_INTERIOR_FLIPS_PCT:
+            failures.append(
+                f"{case}: {flips:.2f}% interior/exterior flips "
+                f"(limit {MAX_INTERIOR_FLIPS_PCT}%)"
+            )
+    return failures
+
+
+def run_depth_sweep(cases: list[dict[str, object]], cuda_exe: Path, out_dir: Path) -> None:
+    """Render the fixed-point case at increasing depth to find where it breaks.
+
+    This is a measurement, not a gate: it is what sets the camera's zoom floor.
+    The reference orbit is double-double (~32 digits), so it eventually stops
+    resolving the pixel grid; the sweep says where.
+    """
+    template = next(case for case in cases if case["id"] == "fixed_point")
+    # The per-scale renders are working images, not release evidence: keep them
+    # out of the archived directory and let the CSV be the artifact.
+    render_dir = out_dir / "sweep"
+    render_dir.mkdir(parents=True, exist_ok=True)
+    rows: list[dict[str, object]] = []
+    for exponent in (16, 20, 24, 28):
+        case = dict(template)
+        case["id"] = f"sweep_1e-{exponent}"
+        case["label"] = f"Fixed point, 1e-{exponent}"
+        case["scale"] = 10.0**-exponent
+        case["max_iter"] = 1200
+        case["dps"] = 90
+        row = render_case(case, cuda_exe, render_dir)
+        rows.append(
+            {
+                "scale": f"{float(case['scale']):.0e}",
+                "max_iter": case["max_iter"],
+                "dps": case["dps"],
+                "mean_abs_rgb": f"{float(row['mean_abs_rgb']):.6f}",
+                "max_abs_rgb": row["max_abs_rgb"],
+                "identical_pixels_pct": f"{float(row['identical_pixels_pct']):.4f}",
+                "matching_pixels_le4_pct": f"{float(row['matching_pixels_le4_pct']):.4f}",
+                "interior_flips_pct": f"{float(row['interior_flips_pct']):.4f}",
+            }
+        )
+        print(f"  1e-{exponent}: mean={row['mean_abs_rgb']:.6f}, max={row['max_abs_rgb']}, "
+              f"identical={row['identical_pixels_pct']:.2f}%")
+
+    csv_path = out_dir / "depth_sweep.csv"
+    with csv_path.open("w", newline="", encoding="utf-8") as stream:
+        writer = csv.DictWriter(stream, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+    print(f"depth sweep -> {csv_path}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Validate the CUDA perturbation renderer against mpmath"
@@ -204,6 +286,12 @@ def main() -> None:
         default=[],
         help="case id to run; repeat to select several (default: all)",
     )
+    parser.add_argument(
+        "--depth-sweep",
+        action="store_true",
+        help="instead of the release matrix, sweep the fixed-point case from 1e-16 to "
+        "1e-28 to locate the camera's usable floor (slow: mpmath at 1200 iterations)",
+    )
     args = parser.parse_args()
 
     cuda_exe = args.cuda.resolve()
@@ -214,6 +302,12 @@ def main() -> None:
         )
 
     cases = json.loads(args.cases.read_text(encoding="utf-8"))
+    args.out.mkdir(parents=True, exist_ok=True)
+
+    if args.depth_sweep:
+        run_depth_sweep(cases, cuda_exe, args.out)
+        return
+
     selected = set(args.case)
     if selected:
         known = {str(case["id"]) for case in cases}
@@ -222,7 +316,6 @@ def main() -> None:
             raise SystemExit(f"unknown validation case(s): {sorted(unknown)}")
         cases = [case for case in cases if str(case["id"]) in selected]
 
-    args.out.mkdir(parents=True, exist_ok=True)
     rows: list[dict[str, object]] = []
     for case in cases:
         print(f"[{case['id']}] rendering mpmath reference and CUDA candidate")
@@ -243,8 +336,10 @@ def main() -> None:
         writer.writerows(rows)
     print(f"validation matrix -> {csv_path}")
 
-    if any(float(row["mean_abs_rgb"]) >= 3.0 for row in rows):
-        print("ERROR: at least one case exceeds the documented mean RGB threshold")
+    failures = check_thresholds(rows)
+    for failure in failures:
+        print(f"ERROR: {failure}")
+    if failures:
         sys.exit(1)
 
 

@@ -1,10 +1,12 @@
-\begin{tabular}{@{}lS[table-format=1.0e-2]S[table-format=1.6]S[table-format=3.2]S[table-format=3.2]@{}}
+\begin{tabular}{@{}lrrrrrr@{}}
 \toprule
-Case & {Scale} & {Mean error} & {Identical (\%)} & {Within 4 (\%)} \\
+Case & Scale & Iter.\ cap & Mean error & Max error & Pixels differing & By $>4$ \\
 \midrule
-Overview & 3e+00 & 0.000163 & 99.95 & 100.00 \\
-Off-centre boundary & 3e-01 & 0.098796 & 99.54 & 99.83 \\
-Deep zoom & 1e-05 & 0.000163 & 99.95 & 100.00 \\
-Repelling fixed point & 1e-10 & 0.005941 & 99.46 & 99.98 \\
+Overview & $3$ & 300 & 0.000163 & 1 & 2 & 0 \\
+Off-centre boundary & $3{\times}10^{-1}$ & 1100 & 0.169515 & 249 & 24 & 11 \\
+Deep zoom & $10^{-5}$ & 700 & 0.000163 & 1 & 2 & 0 \\
+Repelling fixed point & $10^{-10}$ & 400 & 0.000000 & 0 & 0 & 0 \\
+Below binary64 & $10^{-16}$ & 700 & 0.000000 & 0 & 0 & 0 \\
+Deepest validated & $10^{-20}$ & 1200 & 0.144206 & 251 & 20 & 9 \\
 \bottomrule
 \end{tabular}

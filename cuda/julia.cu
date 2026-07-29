@@ -4,6 +4,9 @@
 // but native and massively parallel:
 //   - the reference orbit is computed on the HOST in double-double (high
 //     precision), which positions the reference correctly in deep zoom;
+//   - it is uploaded RELATIVE to Z0 (D_n = Z_n - Z0), like the browser: the
+//     rebasing step needs z - Z0, and forming it from absolute doubles caps the
+//     usable depth at ~1e-13 (see computeReference);
 //   - each pixel tracks its delta δ on the GPU in double (more precise than
 //     the browser's f32, hence cleaner images and deeper zoom);
 //   - Zhuoran rebasing to handle glitches and stretch the reference.
@@ -115,20 +118,32 @@ static dd dd_from_string(const char* s) {
 
 // ============================================================================
 // Reference orbit (host, DD). Same as src/core/referenceOrbit.ts.
-// Output: Zx[], Zy[] as double; returns the number of valid points.
+// Output: Dx[], Dy[] as double, RELATIVE to Z0 (D_n = Z_n - Z0, so D_0 = 0);
+// returns the number of valid points.
+//
+// Relative, not absolute, for the same reason as the browser: the rebasing step
+// needs z - Z0. Storing absolute Z_n would compute it as (Z_n + delta) - Z0,
+// a subtraction of two order-one doubles that quantises the result on a grid of
+// ~2e-16 and wipes out pixel offsets below a view scale of ~1e-13. The
+// subtraction is done here in double-double, where it is exact, and rounded
+// once; D_n + delta then keeps full relative precision however small it is.
 // ============================================================================
 
 static int computeReference(dd cx0, dd cy0, double jcx, double jcy, int maxIter,
-                            double* Zx, double* Zy) {
+                            double* Dx, double* Dy) {
   dd zx = cx0, zy = cy0;
   int len = 0;
   for (int i = 0; i < maxIter; i++) {
-    Zx[i] = dd_to(zx);
-    Zy[i] = dd_to(zy);
+    Dx[i] = dd_to(dd_sub(zx, cx0));
+    Dy[i] = dd_to(dd_sub(zy, cy0));
     len = i + 1;
 
-    double zf = Zx[i], zi = Zy[i];
-    if (zf * zf + zi * zi > 4.0) break;
+    // Escape test on the absolute reference point. We always keep at least two
+    // points (even when Z0 itself is outside the escape radius): the kernel
+    // reads the successor of the point it just used, so a one-point orbit would
+    // send it past the end of the buffer.
+    double zf = dd_to(zx), zi = dd_to(zy);
+    if (i > 0 && zf * zf + zi * zi > 4.0) break;
 
     dd zx2 = dd_mul(zx, zx);
     dd zy2 = dd_mul(zy, zy);
@@ -169,7 +184,8 @@ __device__ static float3 palette(float t) {
 
 __global__ static void renderKernel(unsigned char* out, int W, int H,
                                      double scale, double aspect, int maxIter,
-                                     const double* Zx, const double* Zy, int refLen) {
+                                     double Z0x, double Z0y,
+                                     const double* Dx, const double* Dy, int refLen) {
   int x = blockIdx.x * blockDim.x + threadIdx.x;
   int y = blockIdx.y * blockDim.y + threadIdx.y;
   if (x >= W || y >= H) return;
@@ -180,13 +196,14 @@ __global__ static void renderKernel(unsigned char* out, int W, int H,
   double dx = (uvx - 0.5) * aspect * scale;
   double dy = (0.5 - uvy) * scale;
 
-  double Z0x = Zx[0], Z0y = Zy[0];  // reference start (= view centre)
   int m = 0, iter = 0;
   bool escaped = false;
   double zx = 0.0, zy = 0.0, mag2 = 0.0;
 
   while (iter < maxIter) {
-    double Zxm = Zx[m], Zym = Zy[m];
+    // z = Z[m] + δ, with Z[m] = Z0 + D[m]. Rebuilding Z[m] this way costs an
+    // absolute error of ~1e-16, which only feeds the order-one product 2·Z·δ.
+    double Zxm = Z0x + Dx[m], Zym = Z0y + Dy[m];
     zx = Zxm + dx;
     zy = Zym + dy;
     mag2 = zx * zx + zy * zy;
@@ -201,9 +218,11 @@ __global__ static void renderKernel(unsigned char* out, int W, int H,
     iter++;
 
     // Rebasing: restart from Z[0] when |z - Z0| < |δ| or at the end of the
-    // reference. The new delta is z - Z[0] (preserves the invariant
-    // z = Z[m] + δ when Z0 ≠ 0).
-    double fx = Zx[m] + dx - Z0x, fy = Zy[m] + dy - Z0y;
+    // reference. The new delta is z - Z0 = D[m] + δ, a sum of two offsets that
+    // are both small exactly when the pixel orbit is near the reference.
+    // min(): a reference that escapes on its first step leaves m == refLen here.
+    int mNext = min(m, refLen - 1);
+    double fx = Dx[mNext] + dx, fy = Dy[mNext] + dy;
     if ((fx * fx + fy * fy) < (dx * dx + dy * dy) || m >= refLen - 1) {
       dx = fx;
       dy = fy;
@@ -252,7 +271,8 @@ static float renderView(unsigned char* dOut, int W, int H, dd cx, dd cy,
   CUDA_CHECK(cudaEventCreate(&t0));
   CUDA_CHECK(cudaEventCreate(&t1));
   CUDA_CHECK(cudaEventRecord(t0));
-  renderKernel<<<grid, block>>>(dOut, W, H, scale, (double)W / H, maxIter, dZx, dZy, refLen);
+  renderKernel<<<grid, block>>>(dOut, W, H, scale, (double)W / H, maxIter,
+                                dd_to(cx), dd_to(cy), dZx, dZy, refLen);
   CUDA_CHECK(cudaEventRecord(t1));
   CUDA_CHECK(cudaEventSynchronize(t1));
   CUDA_CHECK(cudaGetLastError());

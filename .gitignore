@@ -51,3 +51,4 @@ paper/*.toc
 .uv-cache/
 __pycache__/
 *.py[cod]
+paper/data/validation/sweep/

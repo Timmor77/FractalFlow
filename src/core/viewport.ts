@@ -2,13 +2,14 @@
 // This class knows nothing about the render backends (WebGPU, WebGL2).
 //
 // Deep-zoom twist: the centre is stored as a double-double (~31 digits).
-// That is what allows going far below float64 (~16 digits) and therefore
-// placing the perturbation reference orbit correctly.
+// That is what allows going below float64 (~16 digits) and therefore placing
+// the perturbation reference orbit correctly.
 // The view size (scale) stays a float64: only its EXPONENT matters, not its
 // digits, and a float64 easily reaches 1e-100.
 
 import type { Dd } from "./doubleDouble";
 import { ddFromNumber, ddToNumber, ddAddNumber } from "./doubleDouble";
+import { VALIDATED_MIN_SCALE } from "./config";
 
 export class Viewport {
   // Initial values used by reset().
@@ -23,11 +24,15 @@ export class Viewport {
   // Vertical size visible in the complex plane. The smaller, the deeper the zoom.
   public scale = this.initialScale;
 
-  // Lower zoom bound. Set by the precision of the double-double centre:
-  // ~31 mantissa digits for values of order 1 => we keep a comfortable margin
-  // down to ~1e-28 before precision visibly degrades. The WebGL2 fallback
-  // raises this floor to its own limit via setMinScale (Renderer.minScale).
-  private minScale = 1e-28;
+  // Lower zoom bound: the deepest scale the release actually validates
+  // (paper/data/validation, case "deepest_validated"). The double-double centre
+  // carries ~31 digits, but the reference orbit inherits its rounding, and the
+  // measured sweep (paper/data/validation/depth_sweep.csv) shows the CUDA
+  // pixels drifting from the arbitrary-precision reference beyond this point:
+  // exact at 1e-16, a handful of boundary pixels at 1e-20, ~3% wrong at 1e-24,
+  // visibly broken at 1e-28. Each backend can lower this further through
+  // setMinScale (Renderer.minScale) — the WebGL2 fallback does.
+  private minScale = VALIDATED_MIN_SCALE;
 
   // Upper bound: barely above the default view (3.0). Beyond that the fractal
   // shrinks until it disappears, so we prevent zooming out too far.

@@ -8,8 +8,9 @@
 [![Technical report](https://img.shields.io/badge/Technical_report-PDF-b31b1b.svg)](paper/main.pdf)
 
 Interactive, deep-zoom **Julia set explorer**. One algorithm — *perturbation theory* —
-implemented three times, in **WGSL**, **GLSL** and **CUDA C**, and cross-validated
-pixel-for-pixel against an arbitrary-precision reference.
+implemented twice, in **WGSL** (WebGPU) and **CUDA C**, with a direct double-single
+**GLSL** renderer as a shallow compatibility fallback. The CUDA output is checked
+pixel-for-pixel against an independent arbitrary-precision reference.
 
 **[▶ Live demo](https://timmor77.github.io/FractalFlow/)** — WebGPU in Chrome/Edge,
 automatic WebGL2 fallback elsewhere.
@@ -22,15 +23,23 @@ automatic WebGL2 fallback elsewhere.
 
 ## Highlights
 
-- **Deep zoom to ~10⁻²⁸ in the browser** — far beyond float32 (~10⁻⁵) and float64
-  (~10⁻¹⁴) — using perturbation theory with a double-double reference orbit.
-- **Same math, three GPU stacks**: a WGSL fragment shader (WebGPU), a double-single
-  GLSL fallback (WebGL2) and a native CUDA kernel, all sharing one algorithm.
-- **Validated, not eyeballed**: renders are compared pixel-for-pixel against an
+- **Deep zoom to 10⁻²⁰, and that number is measured** — direct iteration in a
+  1080-row frame stops separating pixels below ~10⁻⁴ in `float32` and ~2×10⁻¹³ in
+  `float64`; perturbation with a double-double reference orbit takes the CUDA
+  renderer to an exact match with arbitrary precision at 10⁻¹⁶ and a handful of
+  boundary pixels at 10⁻²⁰. The camera stops there, where the evidence stops
+  ([depth sweep](paper/data/validation/depth_sweep.csv)).
+- **One recurrence, two perturbation backends**: a WGSL fragment shader (WebGPU,
+  `f32` deltas) and a native CUDA kernel (`f64` deltas), plus a WebGL2
+  compatibility renderer that iterates directly and is *not* part of the
+  deep-zoom pipeline.
+- **Validated, not eyeballed**: CUDA renders are compared pixel-for-pixel against an
   independent `mpmath` arbitrary-precision implementation — which caught a real
-  off-centre rebasing bug during development.
-- **Measured**: ~0.9 **trillion** iterations/second in the browser on an RTX 3060 Ti,
-  ~40 000× a vectorized NumPy baseline ([benchmarks below](#benchmarks)).
+  off-centre rebasing bug during development, and later a second one in the native
+  path's orbit encoding.
+- **Measured**: a nominal 1 168 GIter/s in the browser on an RTX 3060 Ti. That
+  convention charges every pixel the full iteration cap; the machine really issues
+  about 7% of it ([benchmarks below](#benchmarks)).
 
 ## Gallery
 
@@ -46,9 +55,12 @@ the share-a-view feature demonstrating itself.
 
 ## Why perturbation theory?
 
-Zooming far into a fractal is a *precision* problem. Iterating `z = z² + c` in plain
-`float32` pixelates around `1e-5`; even `double` dies near `1e-15`. The trick that
-unlocks real depth is **perturbation**:
+Zooming far into a fractal is a *precision* problem. Adjacent pixels in a 1080-row
+frame of height `s` are `s/1080` apart, and around `|z| = 1` consecutive `float32`
+values are ~`1e-7` apart, `float64` values ~`2e-16`. Direct iteration therefore
+stops separating neighbouring pixels below a view height of ~`1e-4` in `float32`
+and ~`2e-13` in `float64` — sooner at higher resolution, later near the origin.
+The trick that unlocks real depth is **perturbation**:
 
 1. Compute the orbit of a single **reference point** (the view centre) **once on the
    CPU** in high precision (double-double, ~31 digits).
@@ -65,19 +77,24 @@ z_n = Z[m] + δ                     // full value (Z = reference orbit)
 
 Glitches and an escaping reference are handled with **Zhuoran rebasing**: when `δ` loses
 precision (`|z − Z₀| < |δ|`) or the reference runs out, we restart from `Z[0]` with
-`δ = z − Z₀`. The GPU never sees the absolute coordinate — only the reference orbit and a
-small per-pixel delta — so the shader is actually *simpler* than a naïve high-precision
-one, and much faster.
+`δ = z − Z₀`. The GPU never forms a pixel's exact coordinate as `centre + tiny offset`
+in low precision — it gets the reference orbit and a small per-pixel delta — which is
+why the shader is *simpler* than a naïve high-precision one, and much faster.
 
-One subtlety: the reference orbit is uploaded **relative to Z₀** (`D[m] = Z[m] − Z₀`,
-computed in double-double). Absolute `f32` orbit values would quantise the rebased delta
-`D[m] + δ` to the ~1e-7 grid of O(1) numbers — near a fixed point, where deltas shrink
-with the zoom, neighbouring pixels would collapse onto the same delta and dissolve the
-image into blocky noise. As offsets, both terms are small exactly when precision matters.
+One subtlety, and the bug that took longest to find: the reference orbit is uploaded
+**relative to Z₀** (`D[m] = Z[m] − Z₀`, subtracted in double-double). Absolute orbit
+values would quantise the rebased delta `D[m] + δ` to the grid of O(1) numbers in the
+upload format — ~`1e-7` in `f32`, ~`2e-16` in `f64`. Near a fixed point, where deltas
+shrink with the zoom, neighbouring pixels then collapse onto the same delta and the
+image dissolves into blocky noise: from ~`1e-5` down in the browser, from ~`1e-13` down
+in CUDA. As offsets, both terms are small exactly when precision matters. Rendering the
+same `1e-16` view with the absolute encoding misses **3 509 of 4 096 pixels**; with the
+relative encoding it matches arbitrary precision **exactly**.
 
 The high-precision centre is stored as a **double-double** value (two `float64`s, where
-the second holds the rounding error of the first), which is what lets the browser reach
-~`1e-28` zoom.
+the second holds the rounding error of the first), giving ~31 digits. The camera's floor
+is `1e-20`: not the representation's limit, but the deepest scale where the frozen
+validation still holds (see [Correctness](#correctness)).
 
 <p align="center">
   <img src="docs/deep-zoom.jpg" width="620"
@@ -100,7 +117,7 @@ src/
     config.ts           # shared constants (c, iteration counts)
   backends/
     webgpu/             # primary: perturbation fragment shader in WGSL (f32)
-    webgl/              # fallback: double-single shader in GLSL (works everywhere)
+    webgl/              # fallback: direct double-single shader in GLSL + driver probe
   bench/                # reproducible in-browser benchmark harness (open /?bench)
   controls/             # wheel / drag / pinch / keyboard → viewport
   ui/                   # palettes, Mandelbrot c-picker, stats overlay, panel
@@ -114,51 +131,66 @@ scripts/
 tests/                  # vitest suite for the math core
 ```
 
-| Backend | Delta precision | Max zoom | Role |
-|---------|-----------------|----------|------|
-| WebGPU  | `f32`, DD centre | ~`1e-28` | Primary browser renderer |
-| WebGL2  | double-single (`f32²`), direct iteration | driver-dependent | Compatibility fallback |
-| CUDA    | `double`, DD centre | ~`1e-28` | Native renderer + benchmark |
+| Backend | Delta precision | Zoom floor | Role |
+|---------|-----------------|------------|------|
+| WebGPU  | `f32`, DD centre, relative orbit | `1e-20` (validated depth of the shared pipeline) | Primary browser renderer |
+| CUDA    | `double`, DD centre, relative orbit | `1e-20`, exact match at `1e-16`, degrades past `1e-24` | Native renderer + benchmark |
+| WebGL2  | double-single (`f32²`), direct iteration, no perturbation | `1e-13`, or `1e-4` when the start-up probe finds the compensated arithmetic optimised away | Shallow compatibility fallback, outside the validated pipeline |
 
 ## Benchmarks
 
-Same workload on every backend: 13 zoom depths from `3` down to `3×10⁻¹²`,
-`maxIter = min(300 + 800k, 4000)`, at 1920×1080, on an **RTX 3060 Ti**.
+Same view, schedule and counting convention on both GPU backends: 13 zoom depths from
+`3` down to `3×10⁻¹²`, `maxIter = min(300 + 800k, 4000)`, at 1920×1080, on an
+**RTX 3060 Ti**. Not the same *work*, though — the precisions differ by design, the
+timing methods differ (see below), and the CPU baseline is a single shallow anchor
+with colouring excluded.
 
 ![Iteration throughput vs zoom depth](docs/bench_giter.png)
 
-The counter-intuitive headline: **the browser out-runs native CUDA by ~15×** here.
-Not magic — the WebGPU shader iterates deltas in `f32`, while the CUDA kernel uses
-`f64`, and consumer Ampere executes fp64 at 1/64 of fp32 rate. That is precisely the
-trade perturbation theory exploits: do the precision-critical work once on the CPU
-(double-double reference orbit), and let the GPU crunch cheap low-precision deltas.
-The two implementations bracket the speed/precision spectrum. The frozen
-pixel-level validation matrix covers CUDA; WebGPU has unit-test and luma
-sanity coverage but is not claimed as pixel-validated in this release.
+The counter-intuitive headline: **the browser out-runs native CUDA by ~16×** here.
+Not magic, and not a browser-versus-native result — the WebGPU shader iterates deltas
+in `f32` while the CUDA kernel uses `f64`, and consumer Ampere executes fp64 at 1/64
+of the fp32 rate. The measured gap is far *smaller* than that 64:1, because the `f32`
+kernel is nowhere near its arithmetic ceiling (divergence and control flow dominate)
+while the `f64` one is close to its own. That trade is what perturbation exploits: do
+the precision-critical work once on the CPU, let the GPU crunch cheap deltas.
 
 ![Effective fill rate vs zoom depth](docs/bench_mpix.png)
 
-Peak numbers: **~1,168 GIter/s / 518 Mpix/s** (WebGPU, f32) vs **~76.6 GIter/s /
-139 Mpix/s** (CUDA, f64) vs **0.023 GIter/s** for vectorized NumPy float64 — a
-~51 000× CPU→GPU gap on this workload.
+Peak numbers, both at `scale = 3×10⁻⁶`: **1,168 GIter/s / 292 Mpix/s** (WebGPU,
+f32) vs **70.8 GIter/s / 17.7 Mpix/s** (CUDA, f64), against **0.023 GIter/s** for
+vectorized NumPy float64. The nominal CPU→GPU ratio is ~51 000×, but NumPy has no
+early exit while the GPU rate charges iterations that never ran — correcting for
+that (see below) puts the honest ratio nearer ~2 000×.
 
 <details>
 <summary><b>Methodology & how to reproduce</b></summary>
 
-- Median of 5 frames after 3 warm-up frames per depth. WebGPU is timed with
-  `device.queue.onSubmittedWorkDone()` on an off-screen render target; CUDA with CUDA
-  events; the CPU baseline times only the vectorized iteration (colouring excluded).
+- The browser reports the median of 5 frames after 3 warm-ups per depth, timed with
+  `device.queue.onSubmittedWorkDone()` on an off-screen render target (submission
+  overhead included). CUDA reports the mean of 3 renders after 1 warm-up, with CUDA
+  events around the kernel only. The CPU baseline times the vectorized iteration
+  alone (colouring excluded).
 - GIter/s counts `pixels × maxIter` and is therefore an *upper bound* (escaped pixels
-  stop early). The convention is identical across backends, so comparisons hold.
-- The reference orbit is CPU-side and cached; timed frames measure pure GPU work.
+  stop early). The convention is identical across backends, so backend-to-backend
+  comparisons hold. How large the gap is: at the peak depth the average pixel escapes
+  after 159 of the 4000 permitted iterations, i.e. 4% — measure it yourself with
+  `python scripts/reference_julia.py --escape-stats`.
+- The reference orbit is excluded from the timed region on both paths: cached in the
+  browser, recomputed and uploaded before the events on CUDA. So these numbers are the
+  cost of *redrawing* a view, not of opening a new one — a fresh view adds one CPU
+  double-double orbit (a few ms at the iteration cap) plus its upload.
 - Every sample includes a mean-luma readback to reject silently-black frames, and the
   WebGPU adapter/browser identity is recorded in its CSV header; the full host,
   driver and CUDA environment is frozen in `paper/data/environment.json`.
 - The WebGL2 fallback is deliberately **excluded** from the charts: under ANGLE/D3D11
   its double-single compensated arithmetic is compiled with fast-math and collapses to
   plain `f32`, so beyond shallow depths its output no longer matches the validated
-  backends — and throughput of a wrong image is meaningless. Its role is compatibility,
-  not speed.
+  backends — and throughput of a wrong image is meaningless. The app now detects this
+  at start-up (a 1×1 probe shader), warns in the console and caps the zoom accordingly.
+  On this machine the probe fails, which is why the fallback stops at `1e-4` here.
+- One machine, one driver, one browser build. These curves rank two implementations on
+  one desktop, not WebGPU against CUDA in general.
 
 ```bash
 # 1) CUDA (writes artifacts/cuda_bench.csv)
@@ -179,21 +211,43 @@ uv run python scripts/benchmark.py
 ## Correctness
 
 The CUDA perturbation renderer is checked pixel-for-pixel against direct
-arbitrary-precision iteration in four frozen cases:
+arbitrary-precision iteration (`mpmath`, 50–90 digits) in six frozen 64×64 cases.
+Each image is 4096 pixels; the release gate fails on a mean above 3 levels, on more
+than 1% of pixels differing by more than 4 levels, or on more than 0.5% of
+escaped/not-escaped flips.
 
-- **Overview**: mean RGB error **0.0002/255**, 99.95% identical pixels.
-- **Off-centre boundary**: mean RGB error **0.0988/255**, 99.83% of pixels
-  within four channel levels; the sparse outliers lie on an iteration boundary.
-- **Deep zoom (`1e-5`)**: mean RGB error **0.0002/255**, 99.95% identical.
-- **Fixed-point zoom (`1e-10`)**: mean RGB error **0.0059/255**, 99.98% within
-  four channel levels.
+| Case | Scale | Mean error | Pixels differing | By >4 levels |
+|---|---|---|---|---|
+| Overview | `3` | 0.0002 | 2 | 0 |
+| Off-centre boundary | `3e-1` | 0.1695 | 24 | 11 |
+| Deep zoom | `1e-5` | 0.0002 | 2 | 0 |
+| Repelling fixed point | `1e-10` | **0** | **0** | 0 |
+| Below binary64 | `1e-16` | **0** | **0** | 0 |
+| Deepest validated | `1e-20` | 0.1442 | 20 | 9 |
 
-The WebGPU path is not included in this frozen pixel matrix; automating raw
-WebGPU pixel export is documented as future validation work in the report.
+Two cases match the arbitrary-precision reference *exactly*, including one four orders
+of magnitude below what `float64` coordinates can address. The remaining differences
+sit on escape-time boundaries where neighbouring pixels differ by hundreds of
+iterations, so a one-ulp difference in the delta moves the colour a long way. Past the
+frozen matrix, the archived
+[depth sweep](paper/data/validation/depth_sweep.csv) shows the pipeline degrading
+gracefully: ~3% of pixels wrong at `1e-24`, visibly broken at `1e-28`. That is why the
+camera stops at `1e-20`.
 
-This caught a real bug during development: the rebasing step must restart with
-`δ = z − Z₀`, not `δ = z`. The two are only equal when `Z₀ = 0` (the Mandelbrot case),
+The WebGPU path is now measured too, from the browser: `npm run dev`, then
+`/?validate` re-renders the same cases with the `f32` shader and compares them against
+the same references ([results](paper/data/validation/webgpu_validation.csv)). It is
+measurably looser than CUDA — the `f32` deltas flip 0–2% of pixels between escaped and
+not-escaped, worst at the deepest cases — and most of its whole-image difference comes
+from sampling the palette through a 256-entry LUT rather than evaluating it
+analytically. Interpret the browser as the fast path, CUDA as the accurate one.
+
+Validation caught two real bugs. First, the rebasing step must restart with
+`δ = z − Z₀`, not `δ = z`: the two are only equal when `Z₀ = 0` (the Mandelbrot case),
 so the mistake was invisible at the origin and only showed up in off-centre deep zooms.
+Second, the CUDA kernel used to upload the reference orbit in absolute coordinates,
+which quantised the rebased delta below ~`1e-13`; the `1e-16` case above scores
+3 509 wrong pixels out of 4 096 with that encoding and 0 with the relative one.
 
 The CPU-side math core is additionally covered by a [vitest suite](tests/README.md):
 the double-double arithmetic is verified against exact BigInt ground truth
@@ -251,6 +305,13 @@ uv run python scripts/reference_julia.py --hp --w 64 --h 64 \
 # CPU baseline for the benchmark charts:
 uv run python scripts/reference_julia.py --bench
 
+# CPU-only self-check (float64 vs mpmath) — what CI runs:
+uv run python scripts/reference_julia.py --selftest
+
+# Full release matrix (needs cuda/julia.exe), and the depth sweep behind the floor:
+uv run python scripts/validate_release.py
+uv run python scripts/validate_release.py --depth-sweep
+
 # Benchmark CSVs -> summary + charts:
 uv run python scripts/benchmark.py
 
@@ -264,10 +325,13 @@ Done: WebGL2 viewer → modular architecture → cursor-anchored inertial zoom �
 colouring → **WebGPU backend** → **perturbation deep zoom** → **CUDA renderer +
 benchmark** → **mpmath validation** → interactive `c` + palettes → PNG export →
 shareable URLs → touch/pinch → test suite + CI → cross-backend benchmarks →
-**orbit-relative reference storage** (glitch-free `f32` rebasing near fixed points).
+**orbit-relative reference storage** in both perturbation backends (glitch-free
+rebasing near fixed points) → **in-browser WebGPU validation** (`/?validate`) and a
+measured zoom floor.
 
 Next: quad-double centre for `1e-50+` zoom · series approximation to skip early
-iterations · progressive/tiled rendering.
+iterations · progressive/tiled rendering · comparing raw iteration state instead of
+RGB, so the palette stops confounding the validation.
 
 ## Stack
 
