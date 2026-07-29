@@ -61,6 +61,20 @@ tying a number to the machine that produced it.
 sets the `1e-20` camera floor in `src/core/config.ts`. If it is ever re-run
 with a different result, that constant moves with it.
 
+`data/validation/below_binary64_absolute.png` is the middle panel of Figure 3:
+the same view rendered by the kernel *before* the reference orbit was stored
+relative to Z0. It is the one archived image the current source cannot
+reproduce, so here is how it was made:
+
+```powershell
+git show 1677d79:cuda/julia.cu > $env:TEMP\julia_absolute.cu
+nvcc -O3 $env:TEMP\julia_absolute.cu -o $env:TEMP\julia_absolute.exe
+& $env:TEMP\julia_absolute.exe --w 64 --h 64 --iter 700 --scale 1e-16 `
+    --re -0.527503118643534632274607931351916169475312417511732493905728256658568636526 `
+    --im 0.0759121783522878653764568658687429427997344025257309526545062431394591595504 `
+    --cre -0.8 --cim 0.156 --out paper/data/validation/below_binary64_absolute.png
+```
+
 ## Build the PDF
 
 ```powershell
