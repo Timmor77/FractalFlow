@@ -22,26 +22,44 @@ npm run build
 # Native CUDA renderer
 nvcc -O3 cuda/julia.cu -o cuda/julia.exe
 
-# Four independent mpmath-vs-CUDA validation cases
+# Six independent mpmath-vs-CUDA validation cases, and the release gate
 uv --cache-dir .uv-cache run python scripts/validate_release.py
+
+# Where the pipeline stops agreeing (sets the camera floor, ~20 min)
+uv --cache-dir .uv-cache run python scripts/validate_release.py --depth-sweep
 
 # CUDA and CPU benchmark measurements
 cuda/julia.exe --bench --w 1920 --h 1080 --out paper/data/benchmark/cuda_bench.csv
 uv --cache-dir .uv-cache run python scripts/reference_julia.py --bench
 Copy-Item artifacts/cpu_bench.csv paper/data/benchmark/cpu_bench.csv
 
-# WebGPU: start the app, open /?bench=webgpu, and save the emitted CSV as
-# paper/data/benchmark/webgpu_bench.csv.
+# How much of the iteration cap the benchmark views actually use (~12 min).
+# Section 6.2 uses this to correct the upper-bound GIter/s convention.
+uv --cache-dir .uv-cache run python scripts/reference_julia.py --escape-stats
+
+# Browser artefacts: start the app, then
+#   /?bench=webgpu  -> save the CSV as paper/data/benchmark/webgpu_bench.csv
+#   /?validate      -> save the CSV as data/validation/webgpu_validation.csv
 npm run dev
 
 # Regenerate every report figure and the LaTeX data tables
 uv --cache-dir .uv-cache run python paper/generate_figures.py
 ```
 
-The browser benchmark writes a machine-readable
-`FRACTALFLOW_BENCH_RESULTS` record to the developer console in addition to the
-download button. Keep the CSV header lines because they record the adapter,
-browser, resolution, warm-up count and timing method.
+`generate_figures.py` writes its PDFs without an embedded creation date, so a
+re-run on unchanged inputs reproduces the hashes recorded in
+`generated/manifest.json` byte for byte. A hash mismatch means the data
+changed, not that the plot was redrawn.
+
+Both browser pages write a machine-readable record to the developer console
+(`FRACTALFLOW_BENCH_RESULTS`, `FRACTALFLOW_VALIDATION_RESULTS`) in addition to
+their download button. Keep the CSV header lines: they record the adapter,
+browser, resolution, warm-up count and timing method, which is the only thing
+tying a number to the machine that produced it.
+
+`data/validation/depth_sweep.csv` is a measurement, not a gate — it is what
+sets the `1e-20` camera floor in `src/core/config.ts`. If it is ever re-run
+with a different result, that constant moves with it.
 
 ## Build the PDF
 

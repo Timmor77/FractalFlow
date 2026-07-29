@@ -184,7 +184,7 @@ def architecture_figure() -> Path:
         0.22,
         0.22,
         "mpmath reference",
-        "direct iteration, 50-80 dps",
+        "direct iteration, 50-90 dps",
         "#f3f4f6",
     )
     add_box(
@@ -278,8 +278,8 @@ def precision_figure() -> Path:
 
 def validation_figure() -> Path:
     directory = DATA / "validation"
-    reference_path = directory / "fixed_point_reference.png"
-    cuda_path = directory / "fixed_point_cuda.png"
+    reference_path = directory / "deepest_validated_reference.png"
+    cuda_path = directory / "deepest_validated_cuda.png"
     reference = np.asarray(Image.open(reference_path).convert("RGB"))
     candidate = np.asarray(Image.open(cuda_path).convert("RGB"))
     diff = np.abs(candidate.astype(np.int16) - reference.astype(np.int16))
@@ -296,13 +296,45 @@ def validation_figure() -> Path:
         ax.set_title(title, fontsize=9.5)
         ax.axis("off")
     fig.suptitle(
-        "Repelling fixed-point case at scale $10^{-10}$ "
+        "Repelling fixed point at scale $10^{-20}$ "
         f"(max channel difference {int(diff.max())}/255)",
         fontsize=11,
     )
     fig.tight_layout(rect=(0, 0, 1, 0.92))
     path = FIGURES / "validation_fixed_point.pdf"
     fig.savefig(path, bbox_inches="tight", metadata=NO_DATE)
+    plt.close(fig)
+    return path
+
+
+def depth_figure() -> Path:
+    """Where the pipeline stops agreeing with arbitrary precision."""
+    rows = []
+    with (DATA / "validation" / "depth_sweep.csv").open(newline="", encoding="utf-8") as stream:
+        for row in csv.DictReader(line for line in stream if not line.startswith("#")):
+            rows.append(row)
+    scales = [float(row["scale"]) for row in rows]
+    mean = [float(row["mean_abs_rgb"]) for row in rows]
+    flips = [float(row["interior_flips_pct"]) for row in rows]
+
+    fig, ax = plt.subplots(figsize=(7.6, 3.9))
+    ax.plot(scales, mean, color=COLORS["blue"], marker="o", linewidth=2.0,
+            label="mean absolute RGB error")
+    ax.plot(scales, flips, color=COLORS["orange"], marker="s", linewidth=2.0,
+            label="escaped/not-escaped flips (% of pixels)")
+    ax.axvline(1e-20, color=COLORS["green"], linestyle="--", linewidth=1.4,
+               label="camera floor ($10^{-20}$)")
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.invert_xaxis()
+    ax.set_xlabel("view scale (deeper zoom to the right)")
+    ax.set_ylabel("disagreement with mpmath")
+    ax.set_title("CUDA against arbitrary precision, $64\\times64$, 1200 iterations")
+    ax.grid(True, which="both", color=COLORS["grid"], alpha=0.7)
+    ax.legend(fontsize=8.5, loc="upper left")
+    fig.tight_layout()
+    path = FIGURES / "depth_limit.pdf"
+    fig.savefig(path, metadata=NO_DATE)
     plt.close(fig)
     return path
 
@@ -444,6 +476,7 @@ def main() -> None:
     architecture = architecture_figure()
     precision = precision_figure()
     validation = validation_figure()
+    depth = depth_figure()
     benchmark, benchmark_data = benchmark_figure()
     validation_table = write_validation_table()
     benchmark_table = write_benchmark_table(benchmark_data)
@@ -453,13 +486,15 @@ def main() -> None:
         DATA / "benchmark" / "cuda_bench.csv",
         DATA / "benchmark" / "cpu_bench.csv",
         DATA / "validation" / "validation_results.csv",
-        DATA / "validation" / "fixed_point_reference.png",
-        DATA / "validation" / "fixed_point_cuda.png",
+        DATA / "validation" / "depth_sweep.csv",
+        DATA / "validation" / "deepest_validated_reference.png",
+        DATA / "validation" / "deepest_validated_cuda.png",
     ]
     outputs = [
         architecture,
         precision,
         validation,
+        depth,
         benchmark,
         validation_table,
         benchmark_table,

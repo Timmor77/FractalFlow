@@ -11,7 +11,6 @@
 \usepackage{caption}
 \usepackage{float}
 \usepackage{enumitem}
-\usepackage{siunitx}
 \usepackage{xcolor}
 \usepackage{xurl}
 \usepackage{listings}
@@ -32,7 +31,6 @@
 \graphicspath{{figures/}}
 \setlist{nosep,leftmargin=1.4em}
 \captionsetup{font=small,labelfont=bf}
-\sisetup{detect-all,group-separator={,},group-minimum-digits=4}
 \setlength{\parindent}{1em}
 \setlength{\parskip}{0.15em}
 \setcounter{secnumdepth}{2}
@@ -67,7 +65,7 @@
 \title{\vspace{-1.3em}\textbf{FractalFlow: Portable Deep-Zoom Julia Rendering\\
 with Perturbation Theory across WebGPU and CUDA}}
 \author{Timofei Amosov}
-\date{Technical Report, Version 1.1.0 -- 28 July 2026}
+\date{Technical Report, Version 1.1.0 -- 29 July 2026}
 
 \begin{document}
 \maketitle
@@ -75,27 +73,29 @@ with Perturbation Theory across WebGPU and CUDA}}
 \vspace{-1.7em}
 
 \begin{abstract}
-Interactive rendering of a Julia set becomes a numerical problem long before it
-becomes a throughput problem: direct single-precision iteration can no longer
-distinguish adjacent pixels once the view width is smaller than the spacing of
-the represented coordinates. FractalFlow addresses this problem with a
-high-precision reference orbit computed once per view and low-precision
-per-pixel perturbations evaluated in parallel. The same mathematical recurrence
-is implemented in a WebGPU/WGSL fragment shader with 32-bit deltas and in a
-native CUDA kernel with 64-bit deltas; a WebGL2 direct-iteration backend is kept
-as a compatibility fallback. The browser stores its view centre and reference
-orbit in double-double arithmetic, but uploads orbit samples relative to the
-initial reference point. This avoids a cancellation failure in the rebasing
-step that otherwise quantizes small offsets on the grid of order-one
-single-precision values. Four fixed views are compared against independent
-direct iteration with \texttt{mpmath}, and the resulting images, metrics and
-checksums are archived with the report. On one RTX 3060 Ti system, the measured
-peak upper-bound throughput is approximately \SI{1168}{GIter/s} for WebGPU and
-\SI{76.6}{GIter/s} for CUDA, versus \SI{0.023}{GIter/s} for a vectorized NumPy
-baseline. These figures are not general hardware rankings: they expose the
-precision-throughput trade made by each backend. The report documents the
-algorithm, the implementation-specific precision correction, the limits of the
-evidence and a reproducible release procedure.
+FractalFlow renders deep zooms of the quadratic Julia set with perturbation:
+one reference orbit per view, iterated on the CPU in double-double arithmetic,
+and a per-pixel deviation from that orbit iterated on the GPU at low precision.
+The same recurrence runs in a WebGPU/WGSL fragment shader with binary32 deltas
+and in a CUDA kernel with binary64 deltas; a WebGL2 direct-iteration path is
+kept for compatibility only. One implementation detail decides how deep either
+backend can go. Uploading the reference orbit in absolute coordinates puts the
+rebasing subtraction \(z-Z_0\) on the grid of order-one values in the upload
+format, which flattens pixel offsets from about \(10^{-5}\) view scale
+downwards in binary32 and from about \(10^{-13}\) in binary64; uploading
+\(Z_m-Z_0\), formed in double-double before the rounding, removes the failure
+in both. The effect is not subtle: at a view scale of \(10^{-16}\) the absolute
+encoding misses 3509 of 4096 pixels, the relative one reproduces the
+arbitrary-precision reference exactly. Six fixed \(64\times64\) views are
+compared pixel by pixel against direct \texttt{mpmath} iteration at 50--90
+digits, two of them below what binary64 pixel coordinates can address; a depth
+sweep past the last of them locates where the pipeline stops agreeing, and the
+camera floor is set there rather than at the representation's theoretical
+reach. Throughput on one RTX 3060 Ti peaks at 1168\,GIter/s for WebGPU and
+70.8\,GIter/s for CUDA. Those rates charge every pixel the full iteration cap;
+measured escape times show the hardware issuing about 7\% of that at the peak
+view, so the figure is a fixed-workload normalizer rather than a count of
+executed work.
 \end{abstract}
 
 \section{Motivation and contribution}
@@ -105,38 +105,54 @@ For the quadratic map
   f_c(z) = z^2 + c,\qquad z,c\in\mathbb{C},
   \label{eq:quadratic}
 \end{equation}
-the filled Julia set contains the initial values whose forward orbit remains
-bounded; its boundary is the Julia set \cite{milnor2006}. An escape-time image
-evaluates this orbit for every pixel. At ordinary scales, the method maps well
-to a GPU fragment shader. At deep scales, however, adding a pixel displacement
-to an order-one centre can round back to the centre itself. More iterations or
-more GPU cores cannot recover information that was lost in coordinate
-representation.
+the filled Julia set collects the initial values whose forward orbit stays
+bounded, and the Julia set is its boundary \cite{milnor2006}. An escape-time
+image runs that orbit for every pixel and colours the pixel by how long it
+survives. On a GPU this is one short loop per fragment, which is why the
+shallow case is easy.
 
-Perturbation rendering separates the precision-sensitive and
-throughput-sensitive work. A reference orbit is evaluated at high precision
-once, while neighboring pixels advance only a small deviation from that orbit
-\cite{martin2013,heilandallen2013}. FractalFlow applies this established idea
-specifically to an interactive Julia viewer and makes four engineering
-contributions:
+The method breaks at depth, and the cause is the coordinate format rather than
+the compute budget. In a viewport of \(H\) rows showing a view of height
+\(s\), adjacent pixel
+centres are \(s/H\) apart in the complex plane. Near \(|z|\approx 1\),
+consecutive binary32 values are \(6\times10^{-8}\) to \(1.2\times10^{-7}\)
+apart, and consecutive binary64 values \(1.1\) to \(2.2\times10^{-16}\) apart.
+At \(H=1080\), direct iteration therefore stops separating adjacent pixels
+below a view height of about \(10^{-4}\) in binary32, and about
+\(2\times10^{-13}\) in binary64.
+Adding iterations or cores changes nothing, because the two neighbours have
+become the same number.
+
+Perturbation splits the work by sensitivity. One reference orbit is evaluated
+at high precision, and neighbouring pixels only track a small deviation from it
+\cite{martin2013,heilandallen2013}. FractalFlow applies that established idea
+to an interactive Julia viewer, and the engineering contributions are:
 
 \begin{enumerate}
-  \item a common Julia perturbation recurrence is implemented in a browser
-        WebGPU shader and a native CUDA kernel;
-  \item the browser retains a double-double camera and reference orbit while
-        performing the per-pixel loop entirely in \texttt{f32};
-  \item the reference samples used during rebasing are stored relative to the
-        initial reference point, preventing order-one \texttt{f32}
-        quantization from destroying deep offsets; and
-  \item correctness and throughput evidence are generated by independent
-        scripts and frozen as release data rather than inferred from visual
-        inspection.
+  \item one recurrence, two independent implementations: a WGSL fragment
+        shader with binary32 deltas and a CUDA kernel with binary64 deltas,
+        sharing the pixel mapping, escape radius and colour function with the
+        Python reference renderer;
+  \item a double-double camera and reference orbit, with the per-pixel loop
+        left in the GPU's native precision;
+  \item the reference orbit uploaded relative to \(Z_0\) in both backends.
+        Section~\ref{sec:relative} shows why the absolute form quantizes the
+        rebasing step, at which scale it does so for each precision, and what
+        it costs to fix;
+  \item a measured depth limit. The camera stops at the deepest scale that
+        still agrees with arbitrary precision, and the sweep past it is
+        archived rather than argued; and
+  \item evidence produced by scripts that share no code with the renderers:
+        six validation cases against \texttt{mpmath}, a browser-side comparison
+        of the WebGPU output against the same references, benchmark and
+        escape-time measurements, a recorded environment, and a manifest of
+        input and output hashes for every figure.
 \end{enumerate}
 
-The report does not claim to introduce perturbation, double-double arithmetic
-or rebasing. Its focus is the portable implementation, the numerical failure
-found at the interface between these techniques, and an evidence package that
-can be checked independently.
+Perturbation, double-double arithmetic and rebasing are all prior work, cited
+below. What this report adds is the portable implementation, one precision
+failure at the boundary between those techniques, and an evidence package
+small enough for a reader to re-run.
 
 \begin{figure}[H]
   \centering
@@ -152,14 +168,14 @@ can be checked independently.
 
 \subsection{Reference and delta recurrence}
 
-Let \(Z_n\) be the reference orbit beginning at the view centre \(Z_0\):
+Let \(Z_n\) be the reference orbit starting at the view centre \(Z_0\):
 \begin{equation}
   Z_{n+1}=Z_n^2+c.
   \label{eq:reference}
 \end{equation}
-A pixel begins at \(z_0=Z_0+\delta_0\), where \(\delta_0\) is its screen-space
-offset after scale and aspect-ratio mapping. Writing \(z_n=Z_n+\delta_n\) and
-substituting in Equation~\ref{eq:quadratic} gives
+A pixel starts at \(z_0=Z_0+\delta_0\), where \(\delta_0\) is its screen-space
+offset after the scale and aspect-ratio mapping. Writing \(z_n=Z_n+\delta_n\)
+and substituting into Equation~\ref{eq:quadratic} gives
 \begin{align}
   Z_{n+1}+\delta_{n+1}
     &= (Z_n+\delta_n)^2+c, \nonumber\\
@@ -167,35 +183,42 @@ substituting in Equation~\ref{eq:quadratic} gives
     &=2Z_n\delta_n+\delta_n^2.
   \label{eq:delta}
 \end{align}
-Unlike the corresponding Mandelbrot derivation, there is no \(\delta c\)
-term: \(c\) is constant across a Julia image and the initial value varies per
-pixel. Once \(Z_n\) is known, Equation~\ref{eq:delta} uses only ordinary complex
-products and additions.
+The Mandelbrot derivation carries an extra \(\delta c\) term; here \(c\) is
+constant across the image and the initial value varies per pixel instead, so it
+drops out. Once \(Z_n\) is known, Equation~\ref{eq:delta} needs nothing but
+ordinary complex products and sums.
 
-FractalFlow stores at most 4000 reference points. Each pixel maintains a
-reference index \(m\), an iteration count and the complex delta. The escape
-test uses \(z=Z_m+\delta\); escaped pixels terminate early, while interior
-pixels stop at the iteration limit. Smooth coloring is applied only after the
-escape decision and is kept identical between the measured renderers and the
-Python reference.
+The orbit is capped at 4000 points, the same constant that caps the iteration
+count (\texttt{MAX\_ITER\_LIMIT} in the shared config). At two
+\texttt{f32} per point the GPU storage buffer never exceeds 32\,KiB, so
+it stays in cache during the render. Each pixel carries a reference index
+\(m\), an iteration counter and the complex delta. The escape test is applied
+to \(z=Z_m+\delta\); escaped pixels leave the loop immediately, interior pixels
+run to the cap. Smooth colouring happens after the escape decision, from the
+same formula and the same palette stops transcribed into WGSL, CUDA and
+Python.
 
 \subsection{Rebasing}
 
-A delta can cease to be small relative to its reference or the finite
-reference orbit can run out. FractalFlow adapts the rebasing strategy credited
-to Zhuoran and documented by Heiland-Allen \cite{heilandallen2022}. After a
-delta advance, the implementation forms the pixel displacement from the
-initial reference point,
+A delta can stop being small relative to its reference, and a finite stored
+orbit eventually runs out. FractalFlow uses the rebasing rule credited to
+Zhuoran and documented by Heiland-Allen \cite{heilandallen2022}. After each
+delta advance, the code forms the displacement of the pixel from the first
+reference point,
 \begin{equation}
-  \delta^{(0)} = z-Z_0,
+  \delta^{(0)} = z-Z_0 = D_m+\delta,
   \label{eq:rebase}
 \end{equation}
-and resets \(m\) to zero when
-\(\lvert\delta^{(0)}\rvert < \lvert\delta\rvert\) or the next reference
-sample is unavailable. The crucial expression is \(z-Z_0\), not \(z\).
-These coincide only when \(Z_0=0\), which explains why an incorrect
-Mandelbrot-style reset can remain hidden at the origin and fail in an
-off-centre Julia view.
+and restarts at \(m=0\) with \(\delta\leftarrow\delta^{(0)}\) when
+\(\lvert\delta^{(0)}\rvert<\lvert\delta\rvert\), or when \(m\) has reached the
+last stored sample.
+
+The subtraction is from \(Z_0\), not from zero. Both agree only when
+\(Z_0=0\), which is exactly why a Mandelbrot-style reset \(\delta\leftarrow z\)
+survives testing at the origin and then fails on any off-centre Julia view.
+The shader also clamps the lookup to the last valid index: when a reference
+escapes on its first step, \(m\) already equals the orbit length at this point,
+and an unclamped read would use stale buffer contents.
 
 \section{Precision design}
 
@@ -204,41 +227,64 @@ off-centre Julia view.
 A double-double number represents a value as the unevaluated sum
 \(x_{\mathrm{hi}}+x_{\mathrm{lo}}\) of two binary64 values. Error-free
 transformations such as \textsc{TwoSum}, \textsc{QuickTwoSum} and Dekker's
-split product recover the rounding residual of elementary operations
-\cite{dekker1971,knuth1998,hida2000}. FractalFlow implements only addition,
-subtraction and multiplication. The representation provides roughly 106
-significand bits, or about 31 decimal digits, while retaining the binary64
-exponent range.
+split product recover the rounding residual of the elementary operations
+\cite{dekker1971,knuth1998,hida2000}. The representation carries about 106
+significand bits, near 31 decimal digits, and keeps the binary64 exponent
+range.
 
-The camera centre remains double-double through cursor-anchored zoom and pan.
-The CPU also evaluates Equation~\ref{eq:reference} in double-double. The
-browser does not emulate this arithmetic per pixel: doing so would replace a
-small number of CPU operations with millions of compensated shader
-operations. Instead, the reference is rounded once for GPU upload and the
-pixel delta remains a native \texttt{f32}.
+The browser implements addition, subtraction and multiplication only; nothing
+in the camera or the orbit needs a division. The CUDA host adds one, used
+solely to parse a high-precision centre given on the command line as a decimal
+string. The camera centre stays double-double through cursor-anchored zoom and
+pan, and the CPU evaluates Equation~\ref{eq:reference} in the same arithmetic.
+
+The browser does not emulate that arithmetic per pixel. Doing so would trade a
+few thousand CPU operations for a few million compensated shader operations
+per frame. The reference is rounded once on upload, and the pixel delta stays a
+native \texttt{f32}. At a view scale of \(10^{-28}\) the initial delta is still
+an ordinary \texttt{f32}: only its exponent has moved, and normal \texttt{f32}
+values reach down to \(10^{-38}\).
 
 \subsection{Why the uploaded orbit is relative}
+\label{sec:relative}
 
-An early implementation uploaded absolute orbit samples
-\(\mathrm{fl}_{32}(Z_m)\). This is sufficient for multiplying the small delta
-by an approximate order-one \(Z_m\), but it is unsafe for Equation
-\ref{eq:rebase}. Forming
-\(\mathrm{fl}_{32}(Z_m)+\delta-Z_0\) subtracts nearby order-one values after
-they have already been rounded to a grid whose spacing is approximately
-\(10^{-7}\). At a view scale of \(10^{-10}\), many distinct pixel offsets
-therefore collapse to zero or to the same grid point.
+An early version of the shader uploaded absolute orbit samples
+\(\mathrm{fl}_{32}(Z_m)\). That is enough to multiply a small delta by an
+order-one \(Z_m\) in Equation~\ref{eq:delta}, and it is wrong for
+Equation~\ref{eq:rebase}. Forming \(\mathrm{fl}_{32}(Z_m)+\delta-Z_0\)
+subtracts two order-one values that have already been rounded onto a grid of
+spacing near \(10^{-7}\). Pixel offsets much smaller than that grid do not
+survive the subtraction: they collapse onto the same grid point, neighbouring
+pixels receive identical deltas, and the image breaks into blocks. In practice
+this became visible from about \(10^{-5}\) view scale and got worse with depth.
 
-The current representation uploads
+Both backends now upload
 \begin{equation}
-  D_m = \mathrm{fl}_{32}(Z_m-Z_0),
+  D_m = \mathrm{fl}(Z_m-Z_0),
   \label{eq:relative}
 \end{equation}
-where the subtraction is performed in double-double on the CPU. The rebased
-delta is then \(D_m+\delta\): both terms are small precisely when their sum
-requires relative precision. The shader still reconstructs an approximate
-\(Z_m\) for the recurrence as
-\(\mathrm{fl}_{32}(Z_0)+D_m\), but the precision-critical subtraction is no
-longer performed between two rounded order-one samples.
+with the subtraction performed in double-double on the CPU and one rounding at
+the end. The rebased delta is then \(D_m+\delta\), a sum of two offsets that
+are both small exactly when their sum needs relative precision. The kernel
+still reconstructs an approximate \(Z_m\) as \(\mathrm{fl}(Z_0)+D_m\) for the
+recurrence, where an absolute error at the last bit of an order-one value is
+harmless, but the precision-critical subtraction between two rounded order-one
+samples is gone.
+
+\paragraph{The same failure in binary64.}
+The CUDA kernel kept absolute samples until this release, and the argument
+above applies to it verbatim with a grid near \(2\times10^{-16}\) instead of
+\(10^{-7}\): at 1080 rows the quantization sets in around a view scale of
+\(10^{-13}\). Nothing in the previous report crossed that line -- the benchmark
+stops at \(3\times10^{-12}\) and the deepest validation case was
+\(10^{-10}\) -- so the defect was invisible to the evidence, which is exactly
+what makes it worth reporting. Rendering the fixed-point case at \(10^{-16}\)
+separates the two encodings without ambiguity: the absolute orbit disagrees
+with the arbitrary-precision reference on 3509 of 4096 pixels and a mean of
+128 RGB levels, while the relative orbit reproduces it exactly, pixel for
+pixel. The fix costs one addition per iteration to rebuild \(Z_m\), measured at
+8\% of the kernel's peak throughput, and it is what lets the native path follow
+the browser below binary64.
 
 \begin{figure}[H]
   \centering
@@ -253,107 +299,221 @@ longer performed between two rounded order-one samples.
 
 \section{Three execution backends}
 
-Figure~\ref{fig:architecture} summarizes the shared pipeline. The TypeScript
-host owns the camera, computes the reference and selects a renderer through a
-small common interface.
+Figure~\ref{fig:architecture} shows the shared pipeline. The TypeScript host
+owns the camera, computes the reference and selects a renderer through a small
+common interface.
 
 \paragraph{WebGPU.}
-The primary browser backend uses a WGSL fragment shader and a storage buffer
-for the relative reference orbit. WebGPU maps browser workloads to modern
-native GPU APIs \cite{webgpu2026}; WGSL defines the portable shader language
-and its host-shareable data layout \cite{wgsl2026}. Every fragment evaluates
-Equation~\ref{eq:delta} in \texttt{f32}. A cached reference orbit is reused
-until the view, Julia parameter or iteration limit changes.
+The primary browser backend is a WGSL fragment shader over a fullscreen
+triangle, with the relative reference orbit in a read-only storage buffer and
+the rounded centre, scale, aspect and iteration cap in a uniform block. WebGPU
+maps browser workloads onto modern native GPU APIs \cite{webgpu2026}, and WGSL
+fixes the portable shader language and its host-shareable data layout
+\cite{wgsl2026}. Every fragment evaluates Equation~\ref{eq:delta} in
+\texttt{f32}. The orbit is recomputed only when the view, the Julia parameter
+or the iteration cap changes, so redrawing an unchanged view costs one draw
+call and no CPU work.
 
 \paragraph{CUDA.}
-The native executable repeats the host-side double-double orbit calculation
-and launches a CUDA kernel whose deltas are binary64. CUDA provides native
-single- and double-precision arithmetic, but their throughput can differ
-substantially by device class \cite{cuda2025}. The executable supports both PNG
-rendering and a benchmark schedule identical to the browser harness.
+The native executable repeats the host-side double-double orbit computation,
+uploads it in the same relative form, and launches one thread per pixel in
+\(16\times16\) blocks with binary64 deltas. CUDA offers native single- and
+double-precision arithmetic, but their throughput differs sharply by device
+class: on compute capability 8.6, the hardware retires 128 binary32 operations
+per clock and per multiprocessor against 2 in binary64 \cite{cuda2025}. The
+executable renders PNG files and runs the same benchmark schedule as the
+browser harness.
 
 \paragraph{WebGL2 fallback.}
-The compatibility backend uses a double-single GLSL coordinate representation
-and direct iteration. On the tested Windows ANGLE/D3D11 path, the compensated
-arithmetic is not stable at the deepest scales; it is therefore neither used
-as validation evidence nor included in the throughput chart. This exclusion
-is important: the speed of a numerically wrong image is not a useful
-performance result.
+The compatibility backend iterates directly, with no reference orbit, using a
+double-single GLSL coordinate representation. That representation tops out near
+a view scale of \(10^{-14}\) -- and only if the driver compiles the error-free
+transformations as written. Some do not: the tested Windows ANGLE/D3D11 path
+contracts them with fast-math and discards the low word, which silently reduces
+the shader to plain \texttt{f32}.
 
-\clearpage
-\thispagestyle{fancy}
+Rather than document that as a caveat, the backend now measures it. A
+\(1\times1\) probe shader evaluates \textsc{TwoSum}\((1, 10^{-8})\) with the
+operands passed in a uniform, so the expression cannot be constant-folded, and
+reads back whether the residual survived. When it does the zoom floor is
+\(10^{-13}\); when it does not the floor drops to \(10^{-4}\), which is where
+plain \texttt{f32} stops separating pixels in a 1080-row frame. On the test
+machine the probe fails, and the camera is capped accordingly.
+
+Two further reasons keep this path out of the evidence. Its timings need a
+\(1\times1\) \texttt{readPixels} to mean anything, because \texttt{gl.finish()}
+is not reliably blocking there. And an image that is wrong has no interesting
+throughput. The backend exists so that a browser without WebGPU still shows a
+picture.
+
 \section{Correctness protocol}
+\label{sec:correctness}
 
 \subsection{Independent reference}
 
-The validation path performs direct iteration of Equation~\ref{eq:quadratic}
-with \texttt{mpmath} at 50--80 decimal digits \cite{mpmath2026}. It contains no
-reference orbit, perturbation or rebasing logic. Candidate and reference
-renders share only the declared pixel mapping, escape radius, iteration limit
-and color function. This independence is more useful than comparing the WGSL
-and CUDA ports with each other because a shared algebraic error could make two
-ports agree.
+The validation path iterates Equation~\ref{eq:quadratic} directly with
+\texttt{mpmath} at 50--90 decimal digits \cite{mpmath2026}. It contains no
+reference orbit, no perturbation and no rebasing; it shares with the renderers
+only the declared pixel mapping, the escape radius, the iteration cap and the
+colour function. Comparing the WGSL and CUDA ports against each other would be
+weaker evidence, because a shared algebraic mistake would make both agree.
 
-Four \(64\times64\) cases exercise distinct failure modes: an overview, an
-off-centre boundary, a \(10^{-5}\) deep view and a \(10^{-10}\) view centred
-on a repelling fixed point of \(z^2-0.8+0.156i\). The script records the mean
-absolute RGB error, maximum channel error, percentage of identical pixels,
-percentage whose three channels are all within four levels, and SHA-256 hashes
-of both PNG files. A mean error of three levels is the release failure
-threshold; the exact observations below are read from the archived CSV.
+Each pixel's starting point is formed as the full double-double centre plus its
+exact screen offset, in arbitrary precision. That is what a relative-orbit
+kernel actually iterates: the centre is never rounded into the pixel
+coordinate, only into the order-one factor of the delta recurrence. The
+previous release compared against a binary64-rounded start instead, which was
+faithful to the old absolute-orbit kernel and is meaningless below
+\(10^{-13}\), where a rounded centre collapses whole rows of pixels onto the
+same starting value.
+
+Six \(64\times64\) cases exercise different failure modes: an overview, an
+off-centre boundary region, a \(10^{-5}\) view, and three views centred on a
+repelling fixed point of \(z^2-0.8+0.156i\) specified to 75 decimal digits, at
+\(10^{-10}\), \(10^{-16}\) and \(10^{-20}\). The last two sit below what
+binary64 pixel coordinates can address at all; they exist to test the
+double-double camera, not just the recurrence. For each case the script records
+the mean absolute RGB error, the maximum channel error, the share of identical
+pixels, the share whose three channels are all within four levels, the share of
+escaped/not-escaped flips, and SHA-256 hashes of both PNG files.
+
+The release gate uses three of those. A mean over 4096 pixels is far too
+forgiving on its own -- a handful of completely wrong pixels barely moves it --
+so a case also fails when more than 1\% of its pixels differ by more than four
+levels, or when more than 0.5\% of them flip between escaped and not escaped.
+The flip count is the palette-independent one, and the one a broken rebasing
+step moves first.
 
 \begin{table}[H]
   \centering
   \small
-  \caption{CUDA perturbation output versus direct \texttt{mpmath} rendering.
-  Error units are 8-bit RGB levels, averaged over channels and pixels.}
+  \caption{CUDA perturbation output against direct \texttt{mpmath} rendering,
+  read from the archived \texttt{validation\_results.csv}. Errors are 8-bit RGB
+  levels; counts are out of the 4096 pixels of each \(64\times64\) case.}
   \label{tab:validation}
   \input{generated/validation_table.tex}
 \end{table}
 
-\begin{figure}[H]
+\subsection{What the disagreements are}
+
+Two cases agree exactly: the \(10^{-10}\) and \(10^{-16}\) fixed-point views
+reproduce the arbitrary-precision render pixel for pixel. The two shallow cases
+are as close as an 8-bit output allows, 2 pixels of 4096 differing by a single
+level. The error that remains is concentrated in the off-centre case and in the
+deepest one, and the maxima there -- 249 and 251 levels -- are worth explaining
+rather than burying.
+
+Every pixel that differs by more than four levels sits in a chaotic part of the
+escape-time map. In the off-centre case, the \(3\times3\) neighbourhood of each
+such pixel spans between 524 and 1086 iterations. There, a difference of one
+binary64 ulp on the delta -- around \(10^{-16}\) relative -- is amplified by a
+thousand squarings and shifts the escape time by tens of iterations, and the
+cyclic palette turns that shift into a distant colour. The extreme pixel, at
+row 60 and column 43, escapes at step 1068 under direct iteration and does not
+escape at all before the cap of 1100 in the CUDA render, so one image colours
+it and the other paints it interior black.
+
+The shape of the error matters more than its maximum. A systematic precision
+fault moves many pixels a little; these cases move a few pixels a lot, with
+frame means of 0.17 and 0.14 levels over 4096 pixels. That is chaotic
+sensitivity at the boundary, not a broken recurrence -- and it is why the gate
+reads pixel counts and flips rather than a mean.
+
+\begin{figure}[t]
   \centering
   \includegraphics[width=0.92\linewidth]{validation_fixed_point.pdf}
-  \caption{The most precision-sensitive fixed case. The third panel amplifies
-  absolute channel differences by a factor of 32; the unamplified maximum is
-  printed in the figure title by the generation script.}
+  \caption{The deepest frozen case. The third panel amplifies absolute channel
+  differences by a factor of 32; twenty pixels of 4096 differ, all of them on
+  the escape-time boundary. The unamplified maximum is printed in the figure
+  title by the generation script.}
   \label{fig:validation}
 \end{figure}
 
-The frozen pixel-level matrix covers CUDA, not WebGPU. The browser path shares
-the tested TypeScript double-double and relative-orbit preparation, but advances
-the delta in binary32 and is currently guarded only by unit tests plus the
-benchmark luma readback. This is an explicit evidence gap: a future release
-should export raw WebGPU pixels under automation and compare them with the same
-\texttt{mpmath} reference. The current report therefore does not present the
-CUDA image agreement as a universal proof for every backend.
+\subsection{Where the pipeline stops}
+\label{sec:depth}
 
-\clearpage
-\thispagestyle{fancy}
+The matrix says the renderer is right at \(10^{-20}\). It does not say where it
+stops being right, and that question decides what the camera should allow. The
+same fixed-point case, rendered at 1200 iterations from \(10^{-16}\) to
+\(10^{-28}\), answers it (Figure~\ref{fig:depth}): exact at \(10^{-16}\), 20
+pixels differing at \(10^{-20}\), 2.8\% of pixels differing and 0.46\% flipping
+at \(10^{-24}\), and 21\% differing with a mean of 4.7 levels at \(10^{-28}\).
+
+The mechanism is the reference orbit itself. The double-double centre carries
+about 31 digits, and the orbit computed from it inherits that error; once the
+pixel grid at a given scale is finer than the noise floor of the orbit, the
+perturbation has nothing left to resolve. So \(10^{-28}\), the figure the
+camera used to allow and this report used to quote, is the reach of the
+representation and not of the rendering. The camera now stops at \(10^{-20}\),
+the deepest scale in the frozen matrix, and one constant holds that number for
+both the camera and the perturbation backends.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.86\linewidth]{depth_limit.pdf}
+  \caption{Archived depth sweep. Disagreement with arbitrary precision is flat
+  until \(10^{-20}\) and then climbs by two orders of magnitude over the next
+  eight. The escape flips are palette-independent; the mean is not.}
+  \label{fig:depth}
+\end{figure}
+
+\subsection{The browser path}
+
+Everything above measures CUDA. The browser shares the TypeScript
+double-double, the relative-orbit preparation and the colour function, but
+advances its delta in binary32, so nothing here transfers to it by argument.
+It is now measured directly: the page opened at \texttt{/?validate} re-renders
+the six frozen cases with the WebGPU backend, reads the pixels back from an
+off-screen target, and compares them with the same archived references.
+
+The result is honest rather than flattering. The binary32 path never matches
+exactly, and two separate effects are visible. Almost every pixel differs by a
+level or two because the shaders sample the palette through a 256-entry lookup
+table with linear interpolation while the Python reference evaluates the
+gradient analytically; that is a colouring artefact, and no amount of precision
+removes it. The dynamics show up in the flips: 0\% of pixels change escape
+status in the \(10^{-5}\) and \(10^{-10}\) cases, 0.3\% in the overview, 1.0\%
+at \(10^{-16}\) and 2.1\% at \(10^{-20}\). The browser is the fast path and
+CUDA is the accurate one, which is what the precision choice already implied
+but nothing had previously shown.
+
 \section{Performance experiment}
 
 \subsection{Method}
 
-The benchmark uses 13 view scales \(3\times10^{-k}\), \(k=0,\ldots,12\), at
-\(1920\times1080\). The iteration cap is
-\(\min(300+800k,4000)\). For each depth, the browser reports the median of five
-timed frames after three warm-up frames. Completion is synchronized with
-\texttt{GPUQueue.onSubmittedWorkDone}; rendering targets an off-screen texture,
-and a luma readback rejects silently black output. CUDA uses events around the
-kernel. The reference orbit is prepared and cached before the timed region.
+The benchmark sweeps 13 view scales \(3\times10^{-k}\), \(k=0,\ldots,12\), at
+\(1920\times1080\), centred on the boundary point \(0.76+0.24i\) so the
+reference orbits are long. The iteration cap is \(\min(300+800k,4000)\).
+Both harnesses use that schedule and the same throughput convention, and both
+exclude the reference-orbit preparation from the timed region; the timing
+methods differ and the difference is not negligible:
+
+\begin{itemize}
+  \item The browser renders into an off-screen texture, with no canvas
+        presentation and no \texttt{requestAnimationFrame}. Each depth runs
+        three warm-up frames and reports the median of five timed frames, each
+        bracketed by \texttt{performance.now()} around a submission followed by
+        \texttt{GPUQueue.onSubmittedWorkDone}. Command encoding and submission
+        overhead are therefore inside the measurement. A mean-luma readback
+        after the timed frames rejects silently black output.
+  \item CUDA records events immediately around the kernel launch, after the
+        orbit upload, and reports the mean of three renders after one warm-up.
+        Host-side work, allocation and the copy are outside the window.
+\end{itemize}
 
 The reported iteration rate is
 \begin{equation}
   R = \frac{W H I_{\max}}{t}.
   \label{eq:giter}
 \end{equation}
-This is an upper bound because escaped pixels terminate before \(I_{\max}\).
-It remains useful for a controlled backend comparison because the schedule,
-view, escape behavior and counting convention are shared. The NumPy baseline
-\cite{numpy2020} times vectorized direct binary64 iteration for the shallow
-anchor only and excludes coloring. The timed GPU kernels include their palette
-evaluation and target writes; luma readback and file encoding remain outside
-the timed region.
+It is an upper bound, since escaped pixels stop before \(I_{\max}\). It stays
+useful for comparing backends because the schedule, the view, the escape
+behaviour and the counting convention are shared; how far it sits from the
+work actually issued is measured in Section~\ref{sec:reading}. The NumPy baseline
+\cite{numpy2020} times vectorized direct binary64 iteration at the shallow
+anchor only, with colouring excluded. The timed GPU kernels include their
+palette evaluation and their writes to the target; luma readback and file
+encoding stay outside.
 
 \begin{figure}[H]
   \centering
@@ -375,27 +535,68 @@ the timed region.
 \end{table}
 \thispagestyle{fancy}
 
-\subsection{Interpretation}
+\subsection{Reading the numbers}
+\label{sec:reading}
 
-The observed WebGPU peak is approximately 15.3 times the CUDA peak and roughly
-51,000 times the NumPy GIter/s anchor. This does not imply that a browser is
-intrinsically faster than native CUDA. The two GPU kernels execute different
-precision choices: WebGPU uses binary32 deltas while CUDA uses binary64. On the
-tested consumer Ampere device, the extra precision has a large throughput
-cost. Perturbation makes the binary32 path viable by concentrating extended
-precision in the single CPU reference orbit.
+Both peaks land at \(k=6\): 1168\,GIter/s for WebGPU in 7.1\,ms and
+70.8\,GIter/s for CUDA in 117\,ms, a ratio of 16.5.
 
-The curves also vary with depth because early escape, control-flow divergence
-and the orbit structure change even when \(I_{\max}\) has reached its cap.
-Consequently, a peak alone does not predict interactive frame time for an
-arbitrary Julia parameter or viewport.
+Before either figure is compared with anything physical, the convention needs
+correcting. Direct binary64 iteration over the same frame
+(\texttt{reference\_julia.py -{}-escape-stats}, archived as
+\texttt{escape\_stats.csv}) shows how much of the cap the view really uses: at
+\(k=6\) the average pixel escapes after 159 of the 4000
+permitted iterations, and the average 32-pixel group, which on a SIMT machine
+runs as long as its slowest lane, after 286. The machine therefore issues
+about 7\% of the counted iterations and does about 4\% of them usefully;
+\(R\) overstates issued work by roughly fourteen times at this point. The
+overstatement is not a constant either -- the same measurement gives 30\% at
+\(k=12\) -- and the last paragraph of this section puts that to use.
 
-\clearpage
-\thispagestyle{fancy}
+Feeding that correction back gives a rough utilization. The inner loop is
+about 30 floating-point operations per iteration, counting a fused
+multiply-add as two. At 7\% of 1168\,GIter/s the WebGPU kernel issues on the
+order of \(2.5\) TFLOP/s, against the \(16.2\) TFLOP/s of binary32 this part
+provides (4864 lanes at 1.665\,GHz, two flops per fused multiply-add). The
+CUDA kernel, at 7\% of 70.8\,GIter/s, issues about \(150\) GFLOP/s against the
+\(253\) GFLOP/s it gets in binary64 at the architectural 1:64 rate
+\cite{cuda2025}. So the binary64 kernel runs near three fifths of its
+arithmetic ceiling while the binary32 kernel stays around a sixth of its own,
+and that is why the measured gap is 16.5 rather than the 64 the arithmetic
+ratio alone would predict. What limits the binary32 path is divergence, control
+flow and buffer traffic, not precision. Perturbation is what makes that path
+viable at all: the extended precision is spent once, on the CPU, on a single
+orbit.
+
+The NumPy anchor sits 51,000 times below the WebGPU peak, and that is the
+least trustworthy number here. The vectorized baseline has no early exit: it
+really does run all 300 iterations on every pixel, so its counted iterations
+are executed iterations. Correcting the GPU side alone for its 4\% escape
+fraction brings the comparison nearer 2,000 times, and even that compares an
+array library against a GPU kernel rather than two serious implementations.
+
+Finally, the curves fall with depth: WebGPU drops by a factor of 3.6 between
+\(k=6\) and \(k=12\). Most of that is the convention rather than the machine.
+Deep views escape much later -- at \(k=12\) the average pixel uses 839 of the
+4000 iterations and the average group 30\% of the cap, against 7\% at \(k=6\)
+-- so charging both depths the full cap flatters the shallow one. Scaling each
+point by its measured group fraction leaves WebGPU at 84 GIter/s issued at
+\(k=6\) against 97 at \(k=12\), and CUDA at 5.1 against 5.1. Within the
+accuracy of that correction both kernels issue work at the same rate at both
+depths, and Figure~\ref{fig:benchmark} is largely a picture of how the escape
+statistics change with the view. What does change for a user is the frame
+itself: the deepest frame costs 25\,ms in the browser and 482\,ms in CUDA,
+whichever way the iterations are counted. Both figures are the cost of
+redrawing a cached view; opening a new one adds the CPU orbit and its upload,
+which the timed region excludes.
+
 \section{Reproducibility and limitations}
 
-The release contains source code, lock files, benchmark CSVs, validation PNGs,
-checksums and a figure-generation manifest. The essential commands are:
+The release carries the source, lock files, benchmark CSVs, validation PNGs,
+checksums and a figure manifest. Measurements were taken on Windows 10 with an
+RTX 3060 Ti (driver 610.62, compute capability 8.6), CUDA 13.0, Chrome 150,
+Node 24.18 and Python 3.12.5; the full record is in
+\texttt{paper/data/environment.json}. The commands are:
 
 \begin{lstlisting}
 npm ci
@@ -403,39 +604,75 @@ npm test
 npm run build
 nvcc -O3 cuda/julia.cu -o cuda/julia.exe
 uv --cache-dir .uv-cache run python scripts/validate_release.py
-cuda/julia.exe --bench --w 1920 --h 1080 \
-  --out paper/data/benchmark/cuda_bench.csv
+cuda/julia.exe --bench --w 1920 --h 1080 --out paper/data/benchmark/cuda_bench.csv
+uv --cache-dir .uv-cache run python scripts/reference_julia.py --bench
+Copy-Item artifacts/cpu_bench.csv paper/data/benchmark/cpu_bench.csv
+uv --cache-dir .uv-cache run python scripts/reference_julia.py --escape-stats
+uv --cache-dir .uv-cache run python scripts/validate_release.py --depth-sweep
 uv --cache-dir .uv-cache run python paper/generate_figures.py
 latexmk -cd -norc -pdf paper/main.tex
 \end{lstlisting}
 
-The WebGPU CSV is generated at \texttt{/?bench=webgpu}; the page also emits a
-machine-readable console record. The report PDF is rebuilt in CI with TeX Live
-2026. The software release is licensed under Apache-2.0, while this report and
-its original figures are CC BY 4.0.
+The browser contributes two artefacts of its own: \texttt{/?bench=webgpu}
+writes the throughput CSV, \texttt{/?validate} the WebGPU-versus-reference
+comparison, and both also emit a machine-readable record to the developer
+console. Figures are generated without an embedded creation date, so re-running
+the generator on unchanged inputs reproduces the hashes in
+\texttt{paper/generated/manifest.json} exactly; that is the cheapest way to
+check that the plotted data is the archived data. Continuous integration builds
+the app, runs the unit tests -- including one that reads all four
+implementations and asserts their shared constants still agree -- and runs a
+GPU-free self-check of the reference renderer. The PDF is rebuilt with TeX Live
+2026. The software is licensed under Apache-2.0, this report and its original
+figures under CC BY 4.0.
 
-The evidence has five main limitations. First, performance is measured on one
-RTX 3060 Ti system and one browser/driver stack. Second, RGB comparison can
-hide compensating differences in raw iteration state, although the identical
-color mapping and fixed cases make large errors visible. Third, one reference
-orbit and the current rebasing rule are not a proof of correct rendering for
-every Julia parameter. Fourth, the WebGL2 fallback is a compatibility path,
-not a validated deep-zoom backend on the tested ANGLE configuration. Finally,
-double-double limits the current camera to roughly 31 decimal digits; it is
-not an arbitrary-depth representation.
+What the evidence does not cover:
+
+\begin{itemize}
+  \item one machine. Every timing comes from a single RTX 3060 Ti with one
+        driver and one browser build. Nothing here ranks WebGPU against CUDA
+        in general.
+  \item RGB comparison. Two different iteration states can map to the same
+        colour, and the browser's palette lookup table adds a level or two of
+        its own. Comparing raw escape times would separate colouring from
+        dynamics; the interior-flip metric is the current stand-in.
+  \item six views, one Julia parameter. Agreement at six fixed cases with
+        \(c=-0.8+0.156i\), five of them around the same fixed point, is not a
+        proof that the rebasing rule is correct for every parameter and every
+        view.
+  \item resolution. Every validated case is \(64\times64\). The escape-time
+        boundary is denser in a full frame, and the browser's flip rate would
+        be worth re-measuring there.
+  \item depth. The camera stops at \(10^{-20}\) because that is where the
+        evidence stops (Section~\ref{sec:depth}), and the double-double
+        representation itself gives out a few orders of magnitude below.
+        Deeper work needs quad-double or a big-float camera.
+  \item WebGL2. The fallback is a compatibility path, capped at \(10^{-13}\)
+        or, on drivers that discard the compensated arithmetic, \(10^{-4}\).
+        It is outside the validated pipeline.
+\end{itemize}
 
 \section{Conclusion}
 
-FractalFlow demonstrates a practical division of numerical labor: compute one
-reference orbit with extended precision, then spend the GPU budget on cheap
-per-pixel deltas. The portable recurrence is short; the difficult part is
-preserving the meaning of a small delta at every representation boundary.
-Storing \(Z_m-Z_0\) rather than \(Z_m\) makes the rebasing path scale with the
-view and removes an order-one binary32 quantization failure. Independent
-arbitrary-precision renders and frozen benchmark inputs turn that observation
-into a checkable software result. Future work includes raw iteration-state
-validation, additional devices and browsers, series approximation, progressive
-tiling and a higher-precision camera beyond \(10^{-28}\)-scale views.
+The division of labour is the point: one reference orbit at extended precision
+on the CPU, then a cheap per-pixel delta everywhere else. The recurrence itself
+is four lines in any language. The work is in keeping a small delta meaningful
+across every representation boundary it crosses, and the boundary that cost the
+most was the upload format. Storing \(Z_m-Z_0\) instead of \(Z_m\) makes the
+rebasing step scale with the view; it is worth roughly eight orders of
+magnitude of usable depth in binary32 and three in binary64, for one addition
+per iteration.
+
+The same discipline applies to the claims. Two of the numbers this report
+quoted in its previous version -- a \(10^{-28}\) camera and a validated
+renderer -- turned out to describe a representation and a single backend
+rather than a measurement. Both are now measured: the depth sweep says where
+agreement ends, and the browser is compared against the same references as the
+native path, where it comes out looser. The next steps follow from what the
+measurements cannot yet separate: compare escape times rather than colours,
+validate at full frame resolution rather than \(64\times64\), and run the
+matrix on a second device. Series approximation, progressive tiling and a
+quad-double camera are further out.
 
 \thispagestyle{fancy}
 \begingroup
