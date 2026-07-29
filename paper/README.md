@@ -7,6 +7,8 @@ for:
 > Perturbation Theory across WebGPU and CUDA*. Technical report, version 1.1.0,
 > 2026.
 
+Reserved report DOI: <https://doi.org/10.5281/zenodo.21686326>.
+
 The report is CC BY 4.0. The software in the parent repository is Apache-2.0.
 
 ## Reproduce the evidence

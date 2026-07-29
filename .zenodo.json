@@ -23,6 +23,11 @@
   ],
   "related_identifiers": [
     {
+      "identifier": "https://doi.org/10.5281/zenodo.21686326",
+      "relation": "isDocumentedBy",
+      "resource_type": "publication-report"
+    },
+    {
       "identifier": "https://github.com/Timmor77/FractalFlow",
       "relation": "isSupplementTo",
       "resource_type": "software"
