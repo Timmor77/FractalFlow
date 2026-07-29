@@ -1,6 +1,6 @@
 {
   "captured_at": "2026-07-28T23:56:22+02:00",
-  "repository_base_commit": "9cc61ad3093f162d16b8f84894d6b3fe96fc8cfa",
+  "repository_base_commit": "7f878187cc2f6814109df87b7ba6beab4db17588",
   "operating_system": "Microsoft Windows NT 10.0.19045.0",
   "shell": "PowerShell 7.6.3",
   "cpu_identifier": "Intel64 Family 6 Model 60 Stepping 3, GenuineIntel",
@@ -9,6 +9,7 @@
   "compute_capability": "8.6",
   "cuda_compiler": "CUDA 13.0, build cuda_13.0.r13.0/compiler.36260728_0",
   "browser_user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",
+  "browser_user_agent_webgpu_validation": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Claude/1.24012.9 Chrome/148.0.7778.280 Electron/42.7.0 Safari/537.36 MSIX",
   "node": "24.18.0",
   "npm": "11.16.0",
   "python": "3.12.5",

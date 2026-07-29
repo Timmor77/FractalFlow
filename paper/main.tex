@@ -213,12 +213,25 @@ and restarts at \(m=0\) with \(\delta\leftarrow\delta^{(0)}\) when
 \(\lvert\delta^{(0)}\rvert<\lvert\delta\rvert\), or when \(m\) has reached the
 last stored sample.
 
-The subtraction is from \(Z_0\), not from zero. Both agree only when
-\(Z_0=0\), which is exactly why a Mandelbrot-style reset \(\delta\leftarrow z\)
-survives testing at the origin and then fails on any off-centre Julia view.
-The shader also clamps the lookup to the last valid index: when a reference
-escapes on its first step, \(m\) already equals the orbit length at this point,
-and an unclamped read would use stale buffer contents.
+In the shader that is five lines, and every one of them has a reason:
+
+\begin{lstlisting}[language=C]
+let D2 = refOrbit[min(m, u.refLength - 1u)];
+let fx = D2.x + d.x;
+let fy = D2.y + d.y;
+if ((fx*fx + fy*fy) < (d.x*d.x + d.y*d.y) || m >= u.refLength - 1u) {
+  d = vec2f(fx, fy); m = 0u;
+}
+\end{lstlisting}
+
+The displacement is formed by adding two stored offsets, never by subtracting
+\(Z_0\) from an absolute coordinate -- Section~\ref{sec:relative} is about that
+choice. The subtraction is from \(Z_0\) and not from zero: the two agree only
+when \(Z_0=0\), which is exactly why a Mandelbrot-style reset
+\(\delta\leftarrow z\) survives testing at the origin and then fails on any
+off-centre Julia view. And the index is clamped because a reference that
+escapes on its first step leaves \(m\) at the orbit length here, where an
+unclamped read would return whatever the buffer held.
 
 \section{Precision design}
 
@@ -241,9 +254,10 @@ pan, and the CPU evaluates Equation~\ref{eq:reference} in the same arithmetic.
 The browser does not emulate that arithmetic per pixel. Doing so would trade a
 few thousand CPU operations for a few million compensated shader operations
 per frame. The reference is rounded once on upload, and the pixel delta stays a
-native \texttt{f32}. At a view scale of \(10^{-28}\) the initial delta is still
-an ordinary \texttt{f32}: only its exponent has moved, and normal \texttt{f32}
-values reach down to \(10^{-38}\).
+native \texttt{f32}. At the camera's floor of \(10^{-20}\) the initial delta is
+still an ordinary \texttt{f32} -- only its exponent has moved, and normal
+\texttt{f32} values reach down to \(10^{-38}\). What bounds the depth is the
+reference orbit, not the delta.
 
 \subsection{Why the uploaded orbit is relative}
 \label{sec:relative}
@@ -279,22 +293,37 @@ above applies to it verbatim with a grid near \(2\times10^{-16}\) instead of
 stops at \(3\times10^{-12}\) and the deepest validation case was
 \(10^{-10}\) -- so the defect was invisible to the evidence, which is exactly
 what makes it worth reporting. Rendering the fixed-point case at \(10^{-16}\)
-separates the two encodings without ambiguity: the absolute orbit disagrees
-with the arbitrary-precision reference on 3509 of 4096 pixels and a mean of
-128 RGB levels, while the relative orbit reproduces it exactly, pixel for
-pixel. The fix costs one addition per iteration to rebuild \(Z_m\), measured at
-8\% of the kernel's peak throughput, and it is what lets the native path follow
-the browser below binary64.
+separates the two encodings without ambiguity (Figure~\ref{fig:encoding}). With
+absolute samples the frame comes out as a single colour: every pixel offset
+falls below the grid, every delta lands on the same value, and 3509 of 4096
+pixels disagree with the arbitrary-precision reference at a mean of 128 RGB
+levels. With relative samples the same kernel reproduces that reference
+exactly. The fix costs one addition per iteration to rebuild \(Z_m\), measured
+at 8\% of peak throughput, and it is what lets the native path follow the
+browser below binary64.
 
-\begin{figure}[H]
+\begin{figure}[t]
   \centering
-  \includegraphics[width=0.88\linewidth]{relative_orbit_precision.pdf}
-  \caption{Controlled binary32 experiment at the fixed point used in the
-  validation suite. Encoding the absolute coordinate loses the delta once it
-  falls below the local unit in the last place. Encoding the offset keeps an
-  approximately constant relative error. This plot illustrates the
-  quantization mechanism; it is not a renderer benchmark.}
+  \includegraphics[width=0.86\linewidth]{relative_orbit_precision.pdf}
+  \caption{The mechanism, isolated: reconstructing a known pixel offset from an
+  orbit sample stored either absolutely or relative to \(Z_0\). The absolute
+  form loses the offset entirely once it falls below the local spacing of the
+  format, nine orders of magnitude apart for the two precisions; the relative
+  form holds its relative accuracy however small the offset gets. Controlled
+  arithmetic, not a renderer measurement -- Figure~\ref{fig:encoding} is the
+  same effect on real frames.}
   \label{fig:relative}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.95\linewidth]{orbit_encoding.pdf}
+  \caption{One line of difference in what the host uploads, four orders of
+  magnitude below what binary64 pixel coordinates can address. The middle panel
+  is not a failed render: it is a single colour, every pixel having collapsed
+  onto the same quantized delta. The right-hand panel is byte-identical to the
+  arbitrary-precision reference on all 4096 pixels.}
+  \label{fig:encoding}
 \end{figure}
 
 \section{Three execution backends}
@@ -389,7 +418,9 @@ step moves first.
   \small
   \caption{CUDA perturbation output against direct \texttt{mpmath} rendering,
   read from the archived \texttt{validation\_results.csv}. Errors are 8-bit RGB
-  levels; counts are out of the 4096 pixels of each \(64\times64\) case.}
+  levels; counts are out of the 4096 pixels of each \(64\times64\) case.
+  \emph{Flips} counts pixels the two implementations disagree about escaping at
+  all, the one column a palette cannot influence.}
   \label{tab:validation}
   \input{generated/validation_table.tex}
 \end{table}
@@ -418,16 +449,6 @@ fault moves many pixels a little; these cases move a few pixels a lot, with
 frame means of 0.17 and 0.14 levels over 4096 pixels. That is chaotic
 sensitivity at the boundary, not a broken recurrence -- and it is why the gate
 reads pixel counts and flips rather than a mean.
-
-\begin{figure}[t]
-  \centering
-  \includegraphics[width=0.92\linewidth]{validation_fixed_point.pdf}
-  \caption{The deepest frozen case. The third panel amplifies absolute channel
-  differences by a factor of 32; twenty pixels of 4096 differ, all of them on
-  the escape-time boundary. The unamplified maximum is printed in the figure
-  title by the generation script.}
-  \label{fig:validation}
-\end{figure}
 
 \subsection{Where the pipeline stops}
 \label{sec:depth}
@@ -464,7 +485,10 @@ double-double, the relative-orbit preparation and the colour function, but
 advances its delta in binary32, so nothing here transfers to it by argument.
 It is now measured directly: the page opened at \texttt{/?validate} re-renders
 the six frozen cases with the WebGPU backend, reads the pixels back from an
-off-screen target, and compares them with the same archived references.
+off-screen target, and compares them with the same archived references. The
+run recorded here used the same adapter as everything else in this report but
+a different browser build -- Chromium 148 rather than the Chrome 150 of the
+throughput measurements -- which the archived CSV header states.
 
 The result is honest rather than flattering. The binary32 path never matches
 exactly, and two separate effects are visible. Almost every pixel differs by a

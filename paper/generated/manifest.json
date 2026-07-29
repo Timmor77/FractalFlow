@@ -6,16 +6,17 @@
     "data/benchmark/cpu_bench.csv": "fe30d4e17fb04de169c9cdc2db07fd8ed62e2cfaa30856b26c7f452de128f0b6",
     "data/validation/validation_results.csv": "45f18cdad25d42e1267ec5d388c784640be8a89a70a6ca49a6a4d8bfb69d76ac",
     "data/validation/depth_sweep.csv": "51ffee8b45c3a6ef6a02da7c34e18988775043dc1e41d9868b61b6a49ce513e5",
-    "data/validation/deepest_validated_reference.png": "d5182ec0506a0d808d773cef5cedec35ec80a1fcb62e7b4a6117450deb471b22",
-    "data/validation/deepest_validated_cuda.png": "2238061991fa63df2f15e91e625f2b819983e11c7f5483d9784893ad0d385a08"
+    "data/validation/below_binary64_reference.png": "bac67d2909b6b499ef1a810b714cb6a3aab6a1de86b3425d8b4d5559c7ed9f06",
+    "data/validation/below_binary64_cuda.png": "b02702097e3266d341af8d9f01707d9b6a6bb60c124e051b9ad230b08fc204b7",
+    "data/validation/below_binary64_absolute.png": "64d91b05e16c5aba2763cce82bda176535d577e865f9c45ffa5892152726030a"
   },
   "outputs": {
     "figures/architecture.pdf": "1d655ad36e9877b8f745abd9530c55060c33bd0bb74857e80d04f591aa86aaaf",
-    "figures/relative_orbit_precision.pdf": "9cd74ed415ad0a6a810fbf6aa0cb2283e57e07642ceefb11b8a7ef8fdd205e8b",
-    "figures/validation_fixed_point.pdf": "abf9a463d12736da869f2df40effc4e1fb2e494a144334826bed141e4efcdff8",
+    "figures/relative_orbit_precision.pdf": "fa6fce70c7393a115feb30877111907f860bba31d9fd62e75aceb2529ef00128",
+    "figures/orbit_encoding.pdf": "256df7329b38670c36dc60c956ad225eb5526b31b6222c9a60ef56864d8ddbc3",
     "figures/depth_limit.pdf": "bd0eef9036fff933028f6521ef1c726fc1b9f6ddce8afe793ac5193c0642d549",
     "figures/benchmark_throughput.pdf": "a1825fd4af3843747bf79eb43a9f1a0d75d9e6f6e9b478349660af8f6fe8c0e9",
-    "generated/validation_table.tex": "26bc828eced7c8b50f7ec4e250ba7e078912c16fb4d18ec370398170364a4e4e",
+    "generated/validation_table.tex": "419be3a84ed07842bde12d686afa188d5877ad84757d759570b367d700f70879",
     "generated/benchmark_table.tex": "2a4635c1f2bfec595f43d459c29daf439c32dbea29004ed12eeebe9274bcc7ff"
   }
 }

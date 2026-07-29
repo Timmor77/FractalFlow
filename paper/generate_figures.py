@@ -224,51 +224,48 @@ def architecture_figure() -> Path:
 
 
 def precision_figure() -> Path:
-    scales = np.logspace(-3, -16, 260)
-    center = np.float32(-0.5275031186435346)
+    """The quantization mechanism, at both upload precisions.
+
+    Same controlled experiment for binary32 and binary64: reconstruct a pixel
+    offset from an orbit sample stored either absolutely or relative to Z0. The
+    absolute form dies once the offset falls under the local spacing of the
+    format; the relative form does not care how small the offset gets.
+    """
+    scales = np.logspace(-3, -20, 340)
     exact_delta = 0.37 * scales
+    center = -0.5275031186435346  # the repelling fixed point of the test suite
 
-    absolute_orbit = (
-        np.asarray(np.float32(center.astype(np.float64) + exact_delta), dtype=np.float64)
-        - np.float64(center)
-    )
-    relative_orbit = np.asarray(np.float32(exact_delta), dtype=np.float64)
+    fig, ax = plt.subplots(figsize=(7.8, 4.05))
+    styles = {
+        np.float32: ("binary32", COLORS["orange"], COLORS["blue"], "-"),
+        np.float64: ("binary64", COLORS["purple"], COLORS["green"], "--"),
+    }
+    for dtype, (name, absolute_color, relative_color, dashes) in styles.items():
+        rounded_center = np.float64(dtype(center))
+        absolute = (
+            np.asarray(dtype(np.float64(dtype(center)) + exact_delta), dtype=np.float64)
+            - rounded_center
+        )
+        relative = np.asarray(dtype(exact_delta), dtype=np.float64)
 
-    absolute_error = np.abs(absolute_orbit - exact_delta) / np.abs(exact_delta)
-    relative_error = np.abs(relative_orbit - exact_delta) / np.abs(exact_delta)
-    relative_error = np.maximum(relative_error, np.finfo(float).tiny)
+        absolute_error = np.abs(absolute - exact_delta) / np.abs(exact_delta)
+        relative_error = np.maximum(
+            np.abs(relative - exact_delta) / np.abs(exact_delta), np.finfo(float).tiny
+        )
+        ax.plot(scales, absolute_error, color=absolute_color, linewidth=2.1,
+                linestyle=dashes, label=f"absolute {name} orbit")
+        ax.plot(scales, relative_error, color=relative_color, linewidth=2.1,
+                linestyle=dashes, label=f"relative {name} orbit")
 
-    fig, ax = plt.subplots(figsize=(7.8, 4.25))
-    ax.plot(
-        scales,
-        absolute_error,
-        color=COLORS["orange"],
-        linewidth=2.2,
-        label=r"absolute f32 orbit: $\mathrm{fl}(Z_0+\delta)-Z_0$",
-    )
-    ax.plot(
-        scales,
-        relative_error,
-        color=COLORS["blue"],
-        linewidth=2.2,
-        label=r"relative f32 orbit: $\mathrm{fl}(\delta)$",
-    )
-    ax.axvline(
-        float(np.spacing(center)),
-        color=COLORS["muted"],
-        linestyle="--",
-        linewidth=1.1,
-        label=r"one f32 ulp near $Z_0$",
-    )
     ax.set_xscale("log")
     ax.set_yscale("log")
     ax.invert_xaxis()
-    ax.set_ylim(1e-10, 2)
+    ax.set_ylim(1e-10, 3)
     ax.set_xlabel("delta magnitude (deeper zoom to the right)")
     ax.set_ylabel("relative reconstruction error")
     ax.grid(True, which="both", color=COLORS["grid"], alpha=0.7)
-    ax.legend(loc="lower right", fontsize=8.5)
-    ax.set_title("Controlled f32 quantization experiment near a repelling fixed point")
+    ax.legend(loc="lower right", fontsize=8.2, ncol=2)
+    ax.set_title("Reconstructing a pixel offset from an orbit sample")
     fig.tight_layout()
     path = FIGURES / "relative_orbit_precision.pdf"
     fig.savefig(path, metadata=NO_DATE)
@@ -277,31 +274,40 @@ def precision_figure() -> Path:
 
 
 def validation_figure() -> Path:
-    directory = DATA / "validation"
-    reference_path = directory / "deepest_validated_reference.png"
-    cuda_path = directory / "deepest_validated_cuda.png"
-    reference = np.asarray(Image.open(reference_path).convert("RGB"))
-    candidate = np.asarray(Image.open(cuda_path).convert("RGB"))
-    diff = np.abs(candidate.astype(np.int16) - reference.astype(np.int16))
-    amplified = np.clip(diff * 32, 0, 255).astype(np.uint8)
+    """What the two orbit encodings render, four orders below binary64.
 
-    fig, axes = plt.subplots(1, 3, figsize=(9.4, 3.25))
+    The panels are the whole argument of Section 3.2: same view, same kernel,
+    same iteration count, one line of difference in what the host uploads.
+    """
+    directory = DATA / "validation"
+    reference = np.asarray(Image.open(directory / "below_binary64_reference.png").convert("RGB"))
+    absolute = np.asarray(Image.open(directory / "below_binary64_absolute.png").convert("RGB"))
+    relative = np.asarray(Image.open(directory / "below_binary64_cuda.png").convert("RGB"))
+
+    wrong = int((np.abs(absolute.astype(int) - reference.astype(int)).max(axis=2) > 0).sum())
+    identical = int((np.abs(relative.astype(int) - reference.astype(int)).max(axis=2) == 0).sum())
+    pixels = reference.shape[0] * reference.shape[1]
+
+    fig, axes = plt.subplots(1, 3, figsize=(9.4, 3.4))
     panels = [
-        (reference, "mpmath direct iteration"),
-        (candidate, "CUDA perturbation"),
-        (amplified, r"$32\times$ absolute RGB difference"),
+        (reference, "arbitrary precision", "60 digits, direct iteration"),
+        (absolute, "absolute orbit upload", f"{wrong} of {pixels} pixels wrong"),
+        (relative, "relative orbit upload", f"{identical} of {pixels} pixels exact"),
     ]
-    for ax, (image, title) in zip(axes, panels, strict=True):
+    for ax, (image, title, subtitle) in zip(axes, panels, strict=True):
         ax.imshow(image, interpolation="nearest")
-        ax.set_title(title, fontsize=9.5)
-        ax.axis("off")
+        ax.set_title(title, fontsize=10, color=COLORS["ink"])
+        ax.set_xlabel(subtitle, fontsize=8.5, color=COLORS["muted"])
+        ax.set_xticks([])
+        ax.set_yticks([])
+        for spine in ax.spines.values():
+            spine.set_edgecolor(COLORS["grid"])
     fig.suptitle(
-        "Repelling fixed point at scale $10^{-20}$ "
-        f"(max channel difference {int(diff.max())}/255)",
+        "CUDA at a view scale of $10^{-16}$, 700 iterations",
         fontsize=11,
     )
-    fig.tight_layout(rect=(0, 0, 1, 0.92))
-    path = FIGURES / "validation_fixed_point.pdf"
+    fig.tight_layout(rect=(0, 0, 1, 0.94))
+    path = FIGURES / "orbit_encoding.pdf"
     fig.savefig(path, bbox_inches="tight", metadata=NO_DATE)
     plt.close(fig)
     return path
@@ -403,10 +409,10 @@ def write_validation_table() -> Path:
         rows = list(csv.DictReader(stream))
 
     lines = [
-        r"\begin{tabular}{@{}lrrrrrr@{}}",
+        r"\begin{tabular}{@{}lrrrrrrr@{}}",
         r"\toprule",
         r"Case & Scale & Iter.\ cap & Mean error & Max error "
-        r"& Pixels differing & By $>4$ \\",
+        r"& Pixels differing & By $>4$ & Flips \\",
         r"\midrule",
     ]
     for row in rows:
@@ -416,11 +422,12 @@ def write_validation_table() -> Path:
         # readable form, and the conversion is exact.
         differing = round(pixels * (100.0 - float(row["identical_pixels_pct"])) / 100.0)
         above_four = round(pixels * (100.0 - float(row["matching_pixels_le4_pct"])) / 100.0)
+        flips = round(pixels * float(row["interior_flips_pct"]) / 100.0)
         lines.append(
             f"{label} & {tex_scale(float(row['scale']))} & {int(row['max_iter'])} & "
             f"{float(row['mean_abs_rgb']):.6f} & "
             f"{int(float(row['max_abs_rgb']))} & "
-            f"{differing} & {above_four} \\\\"
+            f"{differing} & {above_four} & {flips} \\\\"
         )
     lines.extend([r"\bottomrule", r"\end{tabular}", ""])
     path = GENERATED / "validation_table.tex"
@@ -487,8 +494,9 @@ def main() -> None:
         DATA / "benchmark" / "cpu_bench.csv",
         DATA / "validation" / "validation_results.csv",
         DATA / "validation" / "depth_sweep.csv",
-        DATA / "validation" / "deepest_validated_reference.png",
-        DATA / "validation" / "deepest_validated_cuda.png",
+        DATA / "validation" / "below_binary64_reference.png",
+        DATA / "validation" / "below_binary64_cuda.png",
+        DATA / "validation" / "below_binary64_absolute.png",
     ]
     outputs = [
         architecture,
