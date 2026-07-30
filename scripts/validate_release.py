@@ -136,17 +136,45 @@ def compare_images(reference_path: Path, candidate_path: Path) -> dict[str, floa
     }
 
 
+# Escape-time comparison, free of the palette.
+#
+# Colours are a lossy view of the iteration state: two different escape times
+# can land on the same 8-bit colour, and the browser's palette lookup table
+# shifts most pixels by a level or two for reasons that have nothing to do with
+# arithmetic. The renderers therefore also emit the smooth iteration count
+# itself, and this compares that. Tolerance is far above the f32 noise floor
+# (~1e-4 at these counts) and far below one iteration.
+RAW_TOLERANCE = 0.01
+
+
+def compare_raw(reference: np.ndarray, candidate: np.ndarray) -> dict[str, float]:
+    interior_reference = reference < 0.0
+    interior_candidate = candidate < 0.0
+    both_escaped = ~interior_reference & ~interior_candidate
+    difference = np.abs(candidate - reference)[both_escaped]
+    return {
+        "raw_max_abs_iter": float(difference.max()) if difference.size else 0.0,
+        "raw_over_tolerance_pct": float(
+            (difference > RAW_TOLERANCE).sum() / reference.size * 100.0
+        ),
+        "raw_interior_flips_pct": float(
+            (interior_reference != interior_candidate).mean() * 100.0
+        ),
+    }
+
+
 def render_case(case: dict[str, object], cuda_exe: Path, out_dir: Path) -> dict[str, object]:
     case_id = str(case["id"])
     reference_path = out_dir / f"{case_id}_reference.png"
     cuda_path = out_dir / f"{case_id}_cuda.png"
+    raw_path = out_dir / f"{case_id}_cuda.f32"
     width = int(case["width"])
     height = int(case["height"])
     max_iter = int(case["max_iter"])
 
     center_re_dd = dd_from_decimal(str(case["center_re"]))
     center_im_dd = dd_from_decimal(str(case["center_im"]))
-    reference = render_mpmath(
+    reference, reference_raw = render_mpmath(
         center_re_dd,
         center_im_dd,
         float(case["scale"]),
@@ -156,6 +184,7 @@ def render_case(case: dict[str, object], cuda_exe: Path, out_dir: Path) -> dict[
         width,
         height,
         int(case["dps"]),
+        with_raw=True,
     )
     Image.fromarray(reference).save(reference_path)
 
@@ -179,10 +208,14 @@ def render_case(case: dict[str, object], cuda_exe: Path, out_dir: Path) -> dict[
         str(case["c_im"]),
         "--out",
         str(cuda_path),
+        "--raw",
+        str(raw_path),
     ]
     subprocess.run(command, cwd=ROOT, check=True)
 
+    candidate_raw = np.fromfile(raw_path, dtype=np.float32).reshape(height, width)
     metrics = compare_images(reference_path, cuda_path)
+    metrics.update(compare_raw(reference_raw, candidate_raw))
     return {
         **case,
         **metrics,
@@ -205,6 +238,7 @@ def render_case(case: dict[str, object], cuda_exe: Path, out_dir: Path) -> dict[
 MAX_MEAN_ABS_RGB = 3.0
 MAX_WORSE_THAN_4_PCT = 1.0
 MAX_INTERIOR_FLIPS_PCT = 0.5
+MAX_RAW_OVER_TOLERANCE_PCT = 1.0
 
 
 def check_thresholds(rows: list[dict[str, object]]) -> list[str]:
@@ -225,6 +259,12 @@ def check_thresholds(rows: list[dict[str, object]]) -> list[str]:
             failures.append(
                 f"{case}: {flips:.2f}% interior/exterior flips "
                 f"(limit {MAX_INTERIOR_FLIPS_PCT}%)"
+            )
+        raw_off = float(row["raw_over_tolerance_pct"])
+        if raw_off > MAX_RAW_OVER_TOLERANCE_PCT:
+            failures.append(
+                f"{case}: {raw_off:.2f}% of escape times differ by more than "
+                f"{RAW_TOLERANCE} iterations (limit {MAX_RAW_OVER_TOLERANCE_PCT}%)"
             )
     return failures
 
@@ -325,7 +365,9 @@ def main() -> None:
             f"  mean={row['mean_abs_rgb']:.6f}/255, "
             f"max={row['max_abs_rgb']}/255, "
             f"identical={row['identical_pixels_pct']:.2f}%, "
-            f"within4={row['matching_pixels_le4_pct']:.2f}%"
+            f"within4={row['matching_pixels_le4_pct']:.2f}%, "
+            f"escape times off by >{RAW_TOLERANCE}: "
+            f"{row['raw_over_tolerance_pct']:.2f}% (max {row['raw_max_abs_iter']:.3f} iter)"
         )
 
     csv_path = args.out / "validation_results.csv"

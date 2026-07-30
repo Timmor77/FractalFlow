@@ -75,6 +75,7 @@ def add_box(
     title: str,
     subtitle: str,
     facecolor: str,
+    dashed: bool = False,
 ) -> None:
     box = FancyBboxPatch(
         (x, y),
@@ -82,7 +83,8 @@ def add_box(
         height,
         boxstyle="round,pad=0.012,rounding_size=0.025",
         linewidth=1.3,
-        edgecolor=COLORS["ink"],
+        linestyle="--" if dashed else "-",
+        edgecolor=COLORS["muted"] if dashed else COLORS["ink"],
         facecolor=facecolor,
     )
     ax.add_patch(box)
@@ -132,90 +134,51 @@ def add_arrow(
 
 
 def architecture_figure() -> Path:
-    fig, ax = plt.subplots(figsize=(10.4, 3.15))
+    """The pipeline, annotated with how far the evidence reaches.
+
+    The dashed box is the point of the figure: the compatibility renderer takes
+    the view state and nothing else, and nothing it produces reaches the
+    evidence. Everything solid is covered by the archived comparisons.
+    """
+    fig, ax = plt.subplots(figsize=(10.4, 3.9))
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
     ax.axis("off")
 
-    add_box(
-        ax,
-        0.02,
-        0.57,
-        0.19,
-        0.25,
-        "View state",
-        "DD centre, scale, c",
-        COLORS["light_purple"],
-    )
-    add_box(
-        ax,
-        0.29,
-        0.57,
-        0.22,
-        0.25,
-        "CPU reference orbit",
-        "double-double; D[m] = Z[m] - Z0",
-        COLORS["light_blue"],
-    )
-    add_box(
-        ax,
-        0.60,
-        0.69,
-        0.18,
-        0.22,
-        "WebGPU / WGSL",
-        "f32 pixel deltas",
-        COLORS["light_orange"],
-    )
-    add_box(
-        ax,
-        0.60,
-        0.39,
-        0.18,
-        0.22,
-        "CUDA",
-        "f64 pixel deltas",
-        COLORS["light_green"],
-    )
-    add_box(
-        ax,
-        0.29,
-        0.12,
-        0.22,
-        0.22,
-        "mpmath reference",
-        "direct iteration, 50-90 dps",
-        "#f3f4f6",
-    )
-    add_box(
-        ax,
-        0.84,
-        0.50,
-        0.14,
-        0.26,
-        "Evidence",
-        "PNG, CSV, error metrics",
-        "#fef3c7",
-    )
+    add_box(ax, 0.02, 0.60, 0.19, 0.21, "View state",
+            "DD centre, scale, c", COLORS["light_purple"])
+    add_box(ax, 0.29, 0.60, 0.22, 0.21, "CPU reference orbit",
+            "double-double; D[m] = Z[m] - Z0", COLORS["light_blue"])
+    add_box(ax, 0.60, 0.72, 0.19, 0.19, "WebGPU / WGSL",
+            "f32 deltas - compared in browser", COLORS["light_orange"])
+    add_box(ax, 0.60, 0.47, 0.19, 0.19, "CUDA",
+            "f64 deltas - pixel-validated", COLORS["light_green"])
+    add_box(ax, 0.60, 0.06, 0.19, 0.19, "WebGL2 fallback",
+            "direct double-single - not validated", "#f3f4f6", dashed=True)
+    add_box(ax, 0.29, 0.20, 0.22, 0.21, "mpmath reference",
+            "direct iteration, 50-90 dps", "#f3f4f6")
+    add_box(ax, 0.85, 0.52, 0.13, 0.24, "Evidence",
+            "PNG, CSV, hashes", "#fef3c7")
 
-    add_arrow(ax, (0.21, 0.695), (0.29, 0.695), "once / view")
-    add_arrow(ax, (0.51, 0.695), (0.60, 0.80), "upload")
-    add_arrow(ax, (0.51, 0.66), (0.60, 0.50), "same recurrence")
-    add_arrow(ax, (0.13, 0.57), (0.29, 0.27), "same view")
-    add_arrow(ax, (0.78, 0.80), (0.84, 0.67))
-    add_arrow(ax, (0.78, 0.50), (0.84, 0.59))
-    add_arrow(ax, (0.51, 0.23), (0.84, 0.52))
+    add_arrow(ax, (0.21, 0.705), (0.29, 0.705), "once / view")
+    add_arrow(ax, (0.51, 0.705), (0.60, 0.82), "upload")
+    add_arrow(ax, (0.51, 0.68), (0.60, 0.58), "same recurrence")
+    add_arrow(ax, (0.14, 0.60), (0.30, 0.42), "same view")
+    add_arrow(ax, (0.79, 0.82), (0.85, 0.70))
+    add_arrow(ax, (0.79, 0.57), (0.85, 0.63))
+    add_arrow(ax, (0.51, 0.31), (0.85, 0.55))
 
-    ax.text(
-        0.5,
-        0.965,
-        "FractalFlow measurement and validation pipeline",
-        ha="center",
-        va="top",
-        fontsize=12,
-        fontweight="bold",
-        color=COLORS["ink"],
-    )
+    # The fallback takes the view state and feeds nothing back.
+    ax.add_patch(FancyArrowPatch(
+        (0.075, 0.595), (0.595, 0.155), arrowstyle="-|>", mutation_scale=14,
+        linewidth=1.2, linestyle="--", color=COLORS["muted"],
+        connectionstyle="angle,angleA=-90,angleB=180,rad=0",
+    ))
+
+    ax.text(0.5, 0.99, "FractalFlow measurement and validation pipeline",
+            ha="center", va="top", fontsize=12, fontweight="bold", color=COLORS["ink"])
+    ax.text(0.895, 0.44, "nothing from the dashed\npath reaches here",
+            ha="center", va="top", fontsize=7.5, color=COLORS["muted"], style="italic")
     fig.tight_layout(pad=0.4)
     path = FIGURES / "architecture.pdf"
     fig.savefig(path, bbox_inches="tight", metadata=NO_DATE)
@@ -273,42 +236,59 @@ def precision_figure() -> Path:
     return path
 
 
-def validation_figure() -> Path:
-    """What the two orbit encodings render, four orders below binary64.
+def encoding_figure() -> Path:
+    """How the orbit encoding decides the usable depth, over three scales.
 
-    The panels are the whole argument of Section 3.2: same view, same kernel,
-    same iteration count, one line of difference in what the host uploads.
+    Same kernel, same view, same 700 iterations, one difference: whether the
+    host uploads Z[m] or Z[m] - Z0. The top row is the CUDA kernel as it shipped
+    before this release, the bottom row as it ships now. The failure is gradual
+    — detail smears before the frame collapses — which is why it survived a
+    validation matrix that stopped at 1e-10.
     """
-    directory = DATA / "validation"
-    reference = np.asarray(Image.open(directory / "below_binary64_reference.png").convert("RGB"))
-    absolute = np.asarray(Image.open(directory / "below_binary64_absolute.png").convert("RGB"))
-    relative = np.asarray(Image.open(directory / "below_binary64_cuda.png").convert("RGB"))
+    scales = ["1e-8", "1e-14", "1e-15", "1e-16"]
+    exponents = {"1e-8": "-8", "1e-14": "-14", "1e-15": "-15", "1e-16": "-16"}
 
-    wrong = int((np.abs(absolute.astype(int) - reference.astype(int)).max(axis=2) > 0).sum())
-    identical = int((np.abs(relative.astype(int) - reference.astype(int)).max(axis=2) == 0).sum())
-    pixels = reference.shape[0] * reference.shape[1]
+    fig, axes = plt.subplots(2, 4, figsize=(10.4, 5.7))
+    for column, scale in enumerate(scales):
+        images = {
+            row: np.asarray(Image.open(DATA / "encoding" / f"{row}_{scale}.png").convert("RGB"))
+            for row in ("absolute", "relative")
+        }
+        differing = 100.0 * (
+            np.abs(images["absolute"].astype(int) - images["relative"].astype(int)).max(axis=2) > 0
+        ).mean()
+        colours = len(np.unique(images["absolute"].reshape(-1, 3), axis=0))
+        note = (
+            "one flat colour" if colours == 1
+            else f"{differing:.0f}% of pixels differ" if differing > 20
+            else "indistinguishable"
+        )
 
-    fig, axes = plt.subplots(1, 3, figsize=(9.4, 3.4))
-    panels = [
-        (reference, "arbitrary precision", "60 digits, direct iteration"),
-        (absolute, "absolute orbit upload", f"{wrong} of {pixels} pixels wrong"),
-        (relative, "relative orbit upload", f"{identical} of {pixels} pixels exact"),
-    ]
-    for ax, (image, title, subtitle) in zip(axes, panels, strict=True):
-        ax.imshow(image, interpolation="nearest")
-        ax.set_title(title, fontsize=10, color=COLORS["ink"])
-        ax.set_xlabel(subtitle, fontsize=8.5, color=COLORS["muted"])
-        ax.set_xticks([])
-        ax.set_yticks([])
-        for spine in ax.spines.values():
-            spine.set_edgecolor(COLORS["grid"])
+        for row, key in enumerate(("absolute", "relative")):
+            ax = axes[row][column]
+            ax.imshow(images[key], interpolation="nearest")
+            ax.set_xticks([])
+            ax.set_yticks([])
+            for spine in ax.spines.values():
+                spine.set_edgecolor(COLORS["grid"])
+            if row == 0:
+                ax.set_title(f"$10^{{{exponents[scale]}}}$", fontsize=12, color=COLORS["ink"])
+            else:
+                ax.set_xlabel(note, fontsize=9, color=COLORS["muted"], labelpad=5)
+            if column == 0:
+                label = (
+                    "absolute orbit\nupload" if key == "absolute" else "relative orbit\nupload"
+                )
+                ax.set_ylabel(label, fontsize=11, color=COLORS["ink"], labelpad=8)
+
     fig.suptitle(
-        "CUDA at a view scale of $10^{-16}$, 700 iterations",
-        fontsize=11,
+        "Same kernel, same views, same 700 iterations: only the upload differs",
+        fontsize=12.5,
+        color=COLORS["ink"],
     )
-    fig.tight_layout(rect=(0, 0, 1, 0.94))
+    fig.tight_layout(rect=(0, 0, 1, 0.955))
     path = FIGURES / "orbit_encoding.pdf"
-    fig.savefig(path, bbox_inches="tight", metadata=NO_DATE)
+    fig.savefig(path, bbox_inches="tight", metadata=NO_DATE, dpi=200)
     plt.close(fig)
     return path
 
@@ -409,10 +389,10 @@ def write_validation_table() -> Path:
         rows = list(csv.DictReader(stream))
 
     lines = [
-        r"\begin{tabular}{@{}lrrrrrrr@{}}",
+        r"\begin{tabular}{@{}lrrrrrrrr@{}}",
         r"\toprule",
         r"Case & Scale & Iter.\ cap & Mean error & Max error "
-        r"& Pixels differing & By $>4$ & Flips \\",
+        r"& Pixels differing & By $>4$ & Flips & Escape times \\",
         r"\midrule",
     ]
     for row in rows:
@@ -423,11 +403,12 @@ def write_validation_table() -> Path:
         differing = round(pixels * (100.0 - float(row["identical_pixels_pct"])) / 100.0)
         above_four = round(pixels * (100.0 - float(row["matching_pixels_le4_pct"])) / 100.0)
         flips = round(pixels * float(row["interior_flips_pct"]) / 100.0)
+        escape_off = round(pixels * float(row["raw_over_tolerance_pct"]) / 100.0)
         lines.append(
             f"{label} & {tex_scale(float(row['scale']))} & {int(row['max_iter'])} & "
             f"{float(row['mean_abs_rgb']):.6f} & "
             f"{int(float(row['max_abs_rgb']))} & "
-            f"{differing} & {above_four} & {flips} \\\\"
+            f"{differing} & {above_four} & {flips} & {escape_off} \\\\"
         )
     lines.extend([r"\bottomrule", r"\end{tabular}", ""])
     path = GENERATED / "validation_table.tex"
@@ -482,7 +463,7 @@ def main() -> None:
 
     architecture = architecture_figure()
     precision = precision_figure()
-    validation = validation_figure()
+    encoding = encoding_figure()
     depth = depth_figure()
     benchmark, benchmark_data = benchmark_figure()
     validation_table = write_validation_table()
@@ -494,14 +475,12 @@ def main() -> None:
         DATA / "benchmark" / "cpu_bench.csv",
         DATA / "validation" / "validation_results.csv",
         DATA / "validation" / "depth_sweep.csv",
-        DATA / "validation" / "below_binary64_reference.png",
-        DATA / "validation" / "below_binary64_cuda.png",
-        DATA / "validation" / "below_binary64_absolute.png",
+        *sorted((DATA / "encoding").glob("*.png")),
     ]
     outputs = [
         architecture,
         precision,
-        validation,
+        encoding,
         depth,
         benchmark,
         validation_table,

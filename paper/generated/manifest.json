@@ -4,19 +4,24 @@
     "data/benchmark/webgpu_bench.csv": "ebbc8377be2a3625069a72029a2a0441d0f4f558a88ca4e4e4e3924ac14739fc",
     "data/benchmark/cuda_bench.csv": "63e394aa64a7f68da0d0716ec386196f06642129aa84a7230585b79949e6c6eb",
     "data/benchmark/cpu_bench.csv": "fe30d4e17fb04de169c9cdc2db07fd8ed62e2cfaa30856b26c7f452de128f0b6",
-    "data/validation/validation_results.csv": "45f18cdad25d42e1267ec5d388c784640be8a89a70a6ca49a6a4d8bfb69d76ac",
+    "data/validation/validation_results.csv": "87ffa12932656fb7ab35339016d0f79f4f665a475e87b5d78a6bfe18b5c3c513",
     "data/validation/depth_sweep.csv": "51ffee8b45c3a6ef6a02da7c34e18988775043dc1e41d9868b61b6a49ce513e5",
-    "data/validation/below_binary64_reference.png": "bac67d2909b6b499ef1a810b714cb6a3aab6a1de86b3425d8b4d5559c7ed9f06",
-    "data/validation/below_binary64_cuda.png": "b02702097e3266d341af8d9f01707d9b6a6bb60c124e051b9ad230b08fc204b7",
-    "data/validation/below_binary64_absolute.png": "64d91b05e16c5aba2763cce82bda176535d577e865f9c45ffa5892152726030a"
+    "data/encoding/absolute_1e-14.png": "4c6b97e950c311fa8363491401423e8cd7998eb6e33987d1d814c8140c36f50d",
+    "data/encoding/absolute_1e-15.png": "db50ebccce0c35445ec5d0ac37cc183110d5ca05c2d5e48301c9d15e5aaad222",
+    "data/encoding/absolute_1e-16.png": "bf7617dedf571f72b6543d7e6569241527ff314b1559e88e2b5cfbb8253b1768",
+    "data/encoding/absolute_1e-8.png": "3ed744e46d1a6b8e007fa2a354201859bc87cfe1caf1f70433487eb5ab296b99",
+    "data/encoding/relative_1e-14.png": "2f2165bfe4e6e0b0339c05d262651f27232d4dfa499f48082fb9d25745ebd322",
+    "data/encoding/relative_1e-15.png": "5f65f3f7a485e00632fd293553563367b94181649444e49072ee439ec3a216d2",
+    "data/encoding/relative_1e-16.png": "024e59a796b35d2762424d4e254dee1a4e9998fff62fec79b610db478da4cd0a",
+    "data/encoding/relative_1e-8.png": "d8afc512054e5cb21eb9b578e54c3dba34a77f2f175efada602ebe538d7f8c98"
   },
   "outputs": {
-    "figures/architecture.pdf": "1d655ad36e9877b8f745abd9530c55060c33bd0bb74857e80d04f591aa86aaaf",
+    "figures/architecture.pdf": "d071e995c113c7d58373f85b8c2db5ca8627f886319a6c4e818af803ee49d549",
     "figures/relative_orbit_precision.pdf": "fa6fce70c7393a115feb30877111907f860bba31d9fd62e75aceb2529ef00128",
-    "figures/orbit_encoding.pdf": "256df7329b38670c36dc60c956ad225eb5526b31b6222c9a60ef56864d8ddbc3",
+    "figures/orbit_encoding.pdf": "9c333672cffd236a77790f02b51c424145468adcb2fe1ecae21de281506b7227",
     "figures/depth_limit.pdf": "bd0eef9036fff933028f6521ef1c726fc1b9f6ddce8afe793ac5193c0642d549",
     "figures/benchmark_throughput.pdf": "a1825fd4af3843747bf79eb43a9f1a0d75d9e6f6e9b478349660af8f6fe8c0e9",
-    "generated/validation_table.tex": "419be3a84ed07842bde12d686afa188d5877ad84757d759570b367d700f70879",
+    "generated/validation_table.tex": "54de381e520bdbc2e729ffb69d25b4872a4468b106223e2360f4dfb0fe796e76",
     "generated/benchmark_table.tex": "2a4635c1f2bfec595f43d459c29daf439c32dbea29004ed12eeebe9274bcc7ff"
   }
 }

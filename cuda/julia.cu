@@ -182,7 +182,13 @@ __device__ static float3 palette(float t) {
   return make_float3(0.0f, 7.0f / 255.0f, 100.0f / 255.0f);
 }
 
-__global__ static void renderKernel(unsigned char* out, int W, int H,
+// rawOut (optional): the smooth iteration count per pixel, before colouring,
+// with INTERIOR_SENTINEL where the orbit never escapes. The validation harness
+// compares that instead of RGB when it wants arithmetic differences separated
+// from palette differences.
+#define INTERIOR_SENTINEL (-1.0f)
+
+__global__ static void renderKernel(unsigned char* out, float* rawOut, int W, int H,
                                      double scale, double aspect, int maxIter,
                                      double Z0x, double Z0y,
                                      const double* Dx, const double* Dy, int refLen) {
@@ -233,12 +239,14 @@ __global__ static void renderKernel(unsigned char* out, int W, int H,
   unsigned char* px = out + (size_t)(y * W + x) * 3;
   if (!escaped) {
     px[0] = 0; px[1] = 0; px[2] = 0;
+    if (rawOut) rawOut[y * W + x] = INTERIOR_SENTINEL;
     return;
   }
 
   // Smooth colouring, identical to the browser backends.
   float nu = log2f(0.5f * log2f((float)mag2));
   float si = (float)iter + 1.0f - nu;
+  if (rawOut) rawOut[y * W + x] = si;
   // Log-damped colour density. A linear t = si * 0.02 cycles the palette
   // several times per pixel wherever the set fills the frame (neighbouring
   // pixels differ by hundreds of iterations), dissolving detail into grey
@@ -257,7 +265,7 @@ __global__ static void renderKernel(unsigned char* out, int W, int H,
 // ============================================================================
 
 // Renders one view and returns the GPU time (ms). Uses the provided buffers.
-static float renderView(unsigned char* dOut, int W, int H, dd cx, dd cy,
+static float renderView(unsigned char* dOut, float* dRaw, int W, int H, dd cx, dd cy,
                         double jcx, double jcy, double scale, int maxIter,
                         double* hZx, double* hZy, double* dZx, double* dZy) {
   int refLen = computeReference(cx, cy, jcx, jcy, maxIter, hZx, hZy);
@@ -271,7 +279,7 @@ static float renderView(unsigned char* dOut, int W, int H, dd cx, dd cy,
   CUDA_CHECK(cudaEventCreate(&t0));
   CUDA_CHECK(cudaEventCreate(&t1));
   CUDA_CHECK(cudaEventRecord(t0));
-  renderKernel<<<grid, block>>>(dOut, W, H, scale, (double)W / H, maxIter,
+  renderKernel<<<grid, block>>>(dOut, dRaw, W, H, scale, (double)W / H, maxIter,
                                 dd_to(cx), dd_to(cy), dZx, dZy, refLen);
   CUDA_CHECK(cudaEventRecord(t1));
   CUDA_CHECK(cudaEventSynchronize(t1));
@@ -331,10 +339,10 @@ static void runBenchmark(int argc, char** argv) {
     // per-pixel work — hence Mpix/s — stays comparable across backends.
     if (maxIter > 4000) maxIter = 4000;
     // Warm-up (JIT compile, caches) then measure the mean of 3 renders.
-    renderView(dOut, W, H, cx, cy, jcx, jcy, scale, maxIter, hZx, hZy, dZx, dZy);
+    renderView(dOut, nullptr, W, H, cx, cy, jcx, jcy, scale, maxIter, hZx, hZy, dZx, dZy);
     float ms = 0.0f;
     for (int r = 0; r < 3; r++)
-      ms += renderView(dOut, W, H, cx, cy, jcx, jcy, scale, maxIter, hZx, hZy, dZx, dZy);
+      ms += renderView(dOut, nullptr, W, H, cx, cy, jcx, jcy, scale, maxIter, hZx, hZy, dZx, dZy);
     ms /= 3.0f;
 
     double pixels = (double)W * H;
@@ -362,20 +370,37 @@ static void runRender(int argc, char** argv) {
   dd cx = dd_from_string(argStr(argc, argv, "--re", "0.0"));
   dd cy = dd_from_string(argStr(argc, argv, "--im", "0.0"));
   const char* out = argStr(argc, argv, "--out", "../artifacts/cuda.png");
+  // --raw: also dump the smooth iteration count as W*H little-endian float32,
+  // for a comparison that owes nothing to the palette (see scripts/validate_release.py).
+  const char* rawPath = argStr(argc, argv, "--raw", nullptr);
 
   double* hZx = (double*)malloc(sizeof(double) * maxIter);
   double* hZy = (double*)malloc(sizeof(double) * maxIter);
   double *dZx, *dZy;
   unsigned char* dOut;
+  float* dRaw = nullptr;
   CUDA_CHECK(cudaMalloc(&dZx, sizeof(double) * maxIter));
   CUDA_CHECK(cudaMalloc(&dZy, sizeof(double) * maxIter));
   CUDA_CHECK(cudaMalloc(&dOut, (size_t)W * H * 3));
+  if (rawPath) CUDA_CHECK(cudaMalloc(&dRaw, (size_t)W * H * sizeof(float)));
 
-  float ms = renderView(dOut, W, H, cx, cy, jcx, jcy, scale, maxIter, hZx, hZy, dZx, dZy);
+  float ms = renderView(dOut, dRaw, W, H, cx, cy, jcx, jcy, scale, maxIter, hZx, hZy, dZx, dZy);
 
   unsigned char* hOut = (unsigned char*)malloc((size_t)W * H * 3);
   CUDA_CHECK(cudaMemcpy(hOut, dOut, (size_t)W * H * 3, cudaMemcpyDeviceToHost));
   stbi_write_png(out, W, H, 3, hOut, W * 3);
+
+  if (rawPath) {
+    float* hRaw = (float*)malloc((size_t)W * H * sizeof(float));
+    CUDA_CHECK(cudaMemcpy(hRaw, dRaw, (size_t)W * H * sizeof(float), cudaMemcpyDeviceToHost));
+    FILE* rawFile = fopen(rawPath, "wb");
+    if (!rawFile) { fprintf(stderr, "cannot write %s\n", rawPath); exit(1); }
+    fwrite(hRaw, sizeof(float), (size_t)W * H, rawFile);
+    fclose(rawFile);
+    printf("Raw escape times -> %s\n", rawPath);
+    free(hRaw);
+    cudaFree(dRaw);
+  }
 
   printf("Rendered %dx%d, scale=%.3e, iter=%d in %.2f ms -> %s\n", W, H, scale, maxIter, ms, out);
 

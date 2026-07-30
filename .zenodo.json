@@ -1,6 +1,6 @@
 {
   "title": "FractalFlow: Deep-Zoom Julia Set Explorer",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "upload_type": "software",
   "description": "Interactive deep-zoom Julia set explorer implementing perturbation rendering across WebGPU/WGSL and native CUDA, with a WebGL2 compatibility backend and independent arbitrary-precision validation.",
   "creators": [

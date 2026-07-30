@@ -43,8 +43,21 @@ automatic WebGL2 fallback elsewhere.
 
 ## Gallery
 
-Every image links to the live demo with that exact view encoded in the URL —
-the share-a-view feature demonstrating itself.
+<p align="center">
+  <a href="docs/renders/hero-4k.png">
+    <img src="docs/renders/hero-4k.png" width="820"
+         alt="Julia set at c = 0.285 + 0.01i, magnified 3e11 times around a repelling fixed point">
+  </a>
+</p>
+
+*`c = 0.285 + 0.01i`, centred on its repelling fixed point at a view height of
+`1e-12` — a **3×10¹¹ magnification**. Rendered by the CUDA backend at 7680×4320
+with 2 600 iterations and downsampled to 4K; [click for the full-resolution
+file](docs/renders/hero-4k.png). Direct `float64` iteration cannot separate
+neighbouring pixels at this depth.*
+
+Every image below links to the live demo with that exact view encoded in the
+URL — the share-a-view feature demonstrating itself.
 
 | | |
 |:---:|:---:|
@@ -180,6 +193,10 @@ that (see below) puts the honest ratio nearer ~2 000×.
   browser, recomputed and uploaded before the events on CUDA. So these numbers are the
   cost of *redrawing* a view, not of opening a new one — a fresh view adds one CPU
   double-double orbit (a few ms at the iteration cap) plus its upload.
+- The browser run starts with an overhead probe: the same measured path at
+  `maxIter = 1`, where the shader does nothing. What it reports is command encoding,
+  submission and the wait — a fixed cost inside the browser timing that CUDA's event
+  window excludes. Correcting for it would widen the browser's lead, not narrow it.
 - Every sample includes a mean-luma readback to reject silently-black frames, and the
   WebGPU adapter/browser identity is recorded in its CSV header; the full host,
   driver and CUDA environment is frozen in `paper/data/environment.json`.
@@ -224,6 +241,12 @@ escaped/not-escaped flips.
 | Repelling fixed point | `1e-10` | **0** | **0** | 0 |
 | Below binary64 | `1e-16` | **0** | **0** | 0 |
 | Deepest validated | `1e-20` | 0.1442 | 20 | 9 |
+
+Colours are compared, but they are not the only thing compared: both renderers also
+emit the raw smooth iteration count (`julia.exe --raw`), and the harness checks that
+directly, with a tolerance of 0.01 iterations. That separates arithmetic from
+palette — the two pixels that differ in the overview case turn out to have *identical*
+escape times, so that difference is colour rounding and nothing else.
 
 Two cases match the arbitrary-precision reference *exactly*, including one four orders
 of magnitude below what `float64` coordinates can address. The remaining differences

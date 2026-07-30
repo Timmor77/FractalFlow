@@ -52,3 +52,4 @@ paper/*.toc
 __pycache__/
 *.py[cod]
 paper/data/validation/sweep/
+paper/data/validation/*.f32

@@ -1,7 +1,7 @@
 {
   "name": "fractalflow",
   "private": true,
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Deep-zoom Julia set explorer — one perturbation-theory algorithm rendered in WebGPU, WebGL2 and CUDA",
   "license": "Apache-2.0",
   "repository": {

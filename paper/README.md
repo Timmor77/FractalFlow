@@ -4,7 +4,7 @@ This directory contains the source, frozen measurements and generated figures
 for:
 
 > Timofei Amosov. *FractalFlow: Portable Deep-Zoom Julia Rendering with
-> Perturbation Theory across WebGPU and CUDA*. Technical report, version 1.1.0,
+> Perturbation Theory across WebGPU and CUDA*. Technical report, version 1.2.0,
 > 2026.
 
 Reserved report DOI: <https://doi.org/10.5281/zenodo.21686326>.
@@ -24,7 +24,9 @@ npm run build
 # Native CUDA renderer
 nvcc -O3 cuda/julia.cu -o cuda/julia.exe
 
-# Six independent mpmath-vs-CUDA validation cases, and the release gate
+# Six independent mpmath-vs-CUDA validation cases, and the release gate.
+# Compares colours and raw escape times (julia.exe --raw); the .f32 dumps are
+# working files, the CSV is the artefact.
 uv --cache-dir .uv-cache run python scripts/validate_release.py
 
 # Where the pipeline stops agreeing (sets the camera floor, ~20 min)

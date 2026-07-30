@@ -33,6 +33,11 @@ from PIL import Image
 ICE_POS = [0.0, 0.16, 0.42, 0.6425, 0.8575, 1.0]
 ICE_COL = [(0, 7, 100), (32, 107, 203), (237, 255, 255), (255, 170, 0), (0, 2, 0), (0, 7, 100)]
 
+# Sentinel written to the raw escape-time grids for pixels that never escape.
+# Matches the value the CUDA kernel writes with --raw, so a mismatch on this
+# value alone is an interior/exterior disagreement.
+INTERIOR = -1.0
+
 
 # Smooth colouring, strictly identical to the GPU backends: log-damped colour
 # density (slope at 0 matches a linear 0.02: 5.545 = 0.02 * 400 / ln 2) into
@@ -159,7 +164,7 @@ def run_escape_stats(out_path: str) -> None:
 
 
 # Direct iteration in arbitrary precision (mpmath). Slow but valid in deep zoom.
-def render_mpmath(cx_str, cy_str, scale, jcx, jcy, max_iter, W, H, dps) -> np.ndarray:
+def render_mpmath(cx_str, cy_str, scale, jcx, jcy, max_iter, W, H, dps, *, with_raw=False):
     from mpmath import mp, mpf
 
     mp.dps = dps
@@ -184,7 +189,11 @@ def render_mpmath(cx_str, cy_str, scale, jcx, jcy, max_iter, W, H, dps) -> np.nd
     # never rounded into the pixel coordinate — and it stays meaningful below
     # the binary64 floor, where a rounded centre would collapse whole rows of
     # pixels onto the same start.
+    # `raw` carries the smooth iteration count before any colouring, with
+    # INTERIOR for pixels that never escape. Comparing that instead of RGB is
+    # what separates an arithmetic difference from a palette difference.
     img = np.zeros((H, W, 3), dtype=np.uint8)
+    raw = np.zeros((H, W), dtype=np.float32)
     for y in range(H):
         uy = (mpf(y) + mpf("0.5")) / mpf(H)
         for x in range(W):
@@ -200,7 +209,11 @@ def render_mpmath(cx_str, cy_str, scale, jcx, jcy, max_iter, W, H, dps) -> np.nd
                     break
                 zx, zy = x2 - y2 + jcx_m, 2 * zx * zy + jcy_m
             img[y, x] = color(it, mag2, max_iter)
-    return img
+            raw[y, x] = (
+                INTERIOR if it >= max_iter
+                else it + 1.0 - math.log2(0.5 * math.log2(mag2))
+            )
+    return (img, raw) if with_raw else img
 
 
 # CI-friendly self-check: the two CPU paths (vectorized float64 and arbitrary

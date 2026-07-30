@@ -26,7 +26,7 @@
   urlcolor=blue!55!black,
   pdfauthor={Timofei Amosov},
   pdftitle={FractalFlow: Portable Deep-Zoom Julia Rendering with Perturbation Theory across WebGPU and CUDA},
-  pdfsubject={Technical report, version 1.1.0, DOI \reportdoi},
+  pdfsubject={Technical report, version 1.2.0, DOI \reportdoi},
   pdfkeywords={Julia set, deep zoom, perturbation theory, WebGPU, CUDA, double-double arithmetic}
 ]{hyperref}
 
@@ -52,13 +52,13 @@
 
 \pagestyle{fancy}
 \fancyhf{}
-\lhead{\footnotesize FractalFlow technical report, version 1.1.0}
+\lhead{\footnotesize FractalFlow technical report, version 1.2.0}
 \rhead{\footnotesize Timofei Amosov}
 \cfoot{\footnotesize \thepage\ of \pageref*{LastPage}}
 \renewcommand{\headrulewidth}{0.3pt}
 \fancypagestyle{plain}{
   \fancyhf{}
-  \lhead{\footnotesize FractalFlow technical report, version 1.1.0}
+  \lhead{\footnotesize FractalFlow technical report, version 1.2.0}
   \rhead{\footnotesize Timofei Amosov}
   \cfoot{\footnotesize \thepage\ of \pageref*{LastPage}}
   \renewcommand{\headrulewidth}{0.3pt}
@@ -67,7 +67,7 @@
 \title{\vspace{-1.3em}\textbf{FractalFlow: Portable Deep-Zoom Julia Rendering\\
 with Perturbation Theory across WebGPU and CUDA}}
 \author{Timofei Amosov}
-\date{Technical Report, Version 1.1.0 -- 29 July 2026\\[0.35em]
+\date{Technical Report, Version 1.2.0 -- 29 July 2026\\[0.35em]
 \small\href{https://doi.org/\reportdoi}{doi:\reportdoi}}
 
 \begin{document}
@@ -100,6 +100,19 @@ measured escape times show the hardware issuing about 7\% of that at the peak
 view, so the figure is a fixed-workload normalizer rather than a count of
 executed work.
 \end{abstract}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{hero.jpg}
+  \caption{What the pipeline is for. \(c=0.285+0.01i\), centred on the
+  repelling fixed point \(z^\ast=0.4735\ldots+0.1889\ldots i\) at a view height
+  of \(10^{-12}\) -- a magnification of \(3\times10^{11}\) from the default
+  view. Rendered by the CUDA backend at \(7680\times4320\) with 2600 iterations
+  and downsampled to \(3840\times2160\); the full-resolution file is in the
+  repository. Direct iteration in binary64 cannot separate neighbouring pixels
+  at this depth.}
+  \label{fig:hero}
+\end{figure}
 
 \section{Motivation and contribution}
 
@@ -321,11 +334,15 @@ browser below binary64.
 \begin{figure}[t]
   \centering
   \includegraphics[width=0.95\linewidth]{orbit_encoding.pdf}
-  \caption{One line of difference in what the host uploads, four orders of
-  magnitude below what binary64 pixel coordinates can address. The middle panel
-  is not a failed render: it is a single colour, every pixel having collapsed
-  onto the same quantized delta. The right-hand panel is byte-identical to the
-  arbitrary-precision reference on all 4096 pixels.}
+  \caption{The same CUDA kernel on the same four views with the same 700
+  iterations; the rows differ only in whether the host uploads \(Z_m\) or
+  \(Z_m-Z_0\). The failure arrives gradually, which is why a validation matrix
+  that stopped at \(10^{-10}\) never saw it: at \(10^{-14}\) the filigree is
+  smeared but the frame still looks like a fractal, at \(10^{-15}\) it breaks
+  into bands of pixels sharing one delta, and at \(10^{-16}\) every pixel has
+  collapsed onto the same value and the frame is one flat colour. The bottom
+  row is the encoding that reproduces arbitrary precision exactly on the
+  archived \(64\times64\) case at \(10^{-16}\).}
   \label{fig:encoding}
 \end{figure}
 
@@ -409,12 +426,23 @@ the mean absolute RGB error, the maximum channel error, the share of identical
 pixels, the share whose three channels are all within four levels, the share of
 escaped/not-escaped flips, and SHA-256 hashes of both PNG files.
 
-The release gate uses three of those. A mean over 4096 pixels is far too
+Colour, however, is a lossy view of the computation. Two different escape times
+can land on the same 8-bit value, and a palette difference looks exactly like
+an arithmetic one. Both renderers therefore also emit the smooth iteration
+count itself -- \texttt{julia.exe -{}-raw} writes it as one binary32 per pixel,
+the reference returns the same grid -- and the harness compares that directly,
+with a tolerance of \(0.01\) iterations, four orders above the binary32 noise
+floor at these counts and two below one iteration. The separation earns its
+keep immediately: the two pixels that differ in the overview case have
+identical escape times, so that difference is the palette rounding and nothing
+else.
+
+The release gate uses four numbers. A mean over 4096 pixels is far too
 forgiving on its own -- a handful of completely wrong pixels barely moves it --
 so a case also fails when more than 1\% of its pixels differ by more than four
-levels, or when more than 0.5\% of them flip between escaped and not escaped.
-The flip count is the palette-independent one, and the one a broken rebasing
-step moves first.
+levels, when more than 0.5\% flip between escaped and not escaped, or when more
+than 1\% have escape times further apart than the tolerance. The last two are
+palette-independent, and they are what a broken rebasing step moves first.
 
 \begin{table}[H]
   \centering
@@ -433,7 +461,11 @@ step moves first.
 Two cases agree exactly: the \(10^{-10}\) and \(10^{-16}\) fixed-point views
 reproduce the arbitrary-precision render pixel for pixel. The two shallow cases
 are as close as an 8-bit output allows, 2 pixels of 4096 differing by a single
-level. The error that remains is concentrated in the off-centre case and in the
+level -- and their escape times are identical everywhere, so even that single
+level is the palette and not the arithmetic. Four of the six cases, in other
+words, compute the same escape time as arbitrary precision at every pixel.
+
+The error that remains is concentrated in the off-centre case and in the
 deepest one, and the maxima there -- 249 and 251 levels -- are worth explaining
 rather than burying.
 
@@ -447,11 +479,18 @@ row 60 and column 43, escapes at step 1068 under direct iteration and does not
 escape at all before the cap of 1100 in the CUDA render, so one image colours
 it and the other paints it interior black.
 
+The escape times put a number on that reading. In the off-centre case 20 pixels
+of 4096 have an escape time further than \(0.01\) iterations from the
+reference, and where they differ they differ by up to 198 iterations; the
+deepest case gives 25 pixels and 167 iterations. Nothing in between: either a
+pixel agrees to the last bit or its orbit went somewhere else entirely, which
+is what chaotic sensitivity looks like when you measure it instead of
+describing it.
+
 The shape of the error matters more than its maximum. A systematic precision
 fault moves many pixels a little; these cases move a few pixels a lot, with
-frame means of 0.17 and 0.14 levels over 4096 pixels. That is chaotic
-sensitivity at the boundary, not a broken recurrence -- and it is why the gate
-reads pixel counts and flips rather than a mean.
+frame means of 0.17 and 0.14 levels over 4096 pixels. That is why the gate
+reads pixel counts, flips and escape times rather than a mean.
 
 \subsection{Where the pipeline stops}
 \label{sec:depth}
@@ -527,6 +566,17 @@ methods differ and the difference is not negligible:
         orbit upload, and reports the mean of three renders after one warm-up.
         Host-side work, allocation and the copy are outside the window.
 \end{itemize}
+
+The browser harness now measures its own overhead before the schedule: the same
+path with the iteration cap set to 1, where every pixel escapes on the first
+test and the shader does nothing worth timing. What remains is command
+encoding, submission and the wait. In the validation browser that probe reads
+4.1\,ms, against 17.8\,ms for the same frame at the iteration cap -- a fixed
+cost of a few milliseconds that sits inside the browser measurement and outside
+CUDA's event window. The absolute values are not those of the frozen
+run, which used a different browser build, but the direction is not in doubt:
+correcting for it would move the comparison further in the browser's favour,
+not less.
 
 The reported iteration rate is
 \begin{equation}
@@ -659,10 +709,10 @@ What the evidence does not cover:
   \item one machine. Every timing comes from a single RTX 3060 Ti with one
         driver and one browser build. Nothing here ranks WebGPU against CUDA
         in general.
-  \item RGB comparison. Two different iteration states can map to the same
-        colour, and the browser's palette lookup table adds a level or two of
-        its own. Comparing raw escape times would separate colouring from
-        dynamics; the interior-flip metric is the current stand-in.
+  \item colouring in the browser comparison. The CUDA matrix now checks escape
+        times directly, but the WebGPU comparison still runs on RGB, where the
+        palette lookup table contributes most of the difference. Exporting the
+        browser's raw iteration counts would close that gap too.
   \item six views, one Julia parameter. Agreement at six fixed cases with
         \(c=-0.8+0.156i\), five of them around the same fixed point, is not a
         proof that the rebasing rule is correct for every parameter and every
@@ -696,9 +746,9 @@ renderer -- turned out to describe a representation and a single backend
 rather than a measurement. Both are now measured: the depth sweep says where
 agreement ends, and the browser is compared against the same references as the
 native path, where it comes out looser. The next steps follow from what the
-measurements cannot yet separate: compare escape times rather than colours,
-validate at full frame resolution rather than \(64\times64\), and run the
-matrix on a second device. Series approximation, progressive tiling and a
+measurements cannot yet separate: export escape times from the browser as the
+native path already does, validate at full frame resolution rather than
+\(64\times64\), and run the matrix on a second device. Series approximation, progressive tiling and a
 quad-double camera are further out.
 
 \thispagestyle{fancy}
@@ -711,6 +761,6 @@ quad-double camera are further out.
 \medskip
 \noindent\footnotesize
 \textbf{Licensing.} Copyright 2026 Timofei Amosov. This report is licensed
-under CC BY 4.0. FractalFlow version 1.1.0 is licensed under Apache-2.0.
+under CC BY 4.0. FractalFlow version 1.2.0 is licensed under Apache-2.0.
 
 \end{document}

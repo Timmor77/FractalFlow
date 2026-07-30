@@ -129,6 +129,30 @@ async function benchWebGpu(log: (line: string) => void): Promise<BackendResult> 
   const lut = makeGreyLut();
   const rows: BenchRow[] = [];
 
+  // Overhead probe, reported before the schedule: the same measured path with
+  // the iteration cap at 1, where every pixel escapes on the first test and the
+  // shader does essentially nothing. What is left is command encoding,
+  // submission and the wait on onSubmittedWorkDone — all of it inside the
+  // browser's timing window, none of it inside CUDA's event window. Read the
+  // browser-versus-CUDA comparison with this number in hand.
+  {
+    const probe = makeView(BENCH_SCHEDULE[0].scale, 1, lut);
+    for (let i = 0; i < WARMUP_FRAMES; i++) {
+      renderer.renderToTexture(probe, targetView, BENCH_WIDTH, BENCH_HEIGHT);
+      await device.queue.onSubmittedWorkDone();
+    }
+    const probeTimes: number[] = [];
+    for (let i = 0; i < TIMED_FRAMES; i++) {
+      const t0 = performance.now();
+      renderer.renderToTexture(probe, targetView, BENCH_WIDTH, BENCH_HEIGHT);
+      await device.queue.onSubmittedWorkDone();
+      probeTimes.push(performance.now() - t0);
+    }
+    const overhead = median(probeTimes);
+    rows.push(toRow(BENCH_SCHEDULE[0].scale, 1, overhead, Number.NaN));
+    log(`submission overhead (maxIter = 1): ${overhead.toFixed(2)} ms`);
+  }
+
   for (const point of BENCH_SCHEDULE) {
     const view = makeView(point.scale, point.maxIter, lut);
 
