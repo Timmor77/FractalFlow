@@ -79,7 +79,7 @@ function renderMap(canvas: HTMLCanvasElement): void {
     gl.compileShader(sh);
     return sh;
   };
-  const program = gl.createProgram()!;
+  const program = gl.createProgram();
   gl.attachShader(program, compile(gl.VERTEX_SHADER, vertexSrc));
   gl.attachShader(program, compile(gl.FRAGMENT_SHADER, fragmentSrc));
   gl.linkProgram(program);

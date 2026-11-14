@@ -1,4 +1,5 @@
-// User controls: wheel (zoom), drag / touch (pan, pinch), keyboard (reset).
+// User controls: wheel (zoom), drag / touch (pan, pinch), keyboard (pan, zoom,
+// reset).
 //
 // This module translates pointer/keyboard events into Viewport operations,
 // then requests a new render. Backend-independent: it works identically with
@@ -20,16 +21,22 @@ export function shouldIgnoreShortcut(event: KeyboardEvent): boolean {
   );
 }
 
+// Keyboard steps: one arrow press pans by this fraction of the shorter canvas
+// side; one plus / minus press scales the view by this factor.
+const KEY_PAN_FRACTION = 0.08;
+const KEY_ZOOM_FACTOR = 0.8;
+
 // Attaches all event listeners to the canvas and the window.
 // `requestRender` is called when the view changes (pan/reset). `onWheel`
-// receives each wheel notch and `onPinch` each two-finger spread change:
-// main drives the smooth zoom (see viewport.nudgeZoom / nudgeZoomByFactor).
+// receives each wheel notch and `onZoomBy` each zoom by a factor around a screen
+// point (two-finger spread change, plus / minus keys): main drives the smooth
+// zoom (see viewport.nudgeZoom / nudgeZoomByFactor).
 export function attachControls(
   canvas: HTMLCanvasElement,
   viewport: Viewport,
   requestRender: () => void,
   onWheel: (mouseX: number, mouseY: number, rect: DOMRect, deltaY: number) => void,
-  onPinch: (midX: number, midY: number, rect: DOMRect, factor: number) => void,
+  onZoomBy: (midX: number, midY: number, rect: DOMRect, factor: number) => void,
 ): void {
   // Wheel zoom, centred on the cursor (delegated to main for inertia).
   canvas.addEventListener("wheel", (event: WheelEvent) => {
@@ -82,7 +89,7 @@ export function attachControls(
       );
       if (before.dist > 0 && after.dist > 0) {
         // Fingers spreading => factor < 1 => zoom in.
-        onPinch(after.midX, after.midY, canvas.getBoundingClientRect(), before.dist / after.dist);
+        onZoomBy(after.midX, after.midY, canvas.getBoundingClientRect(), before.dist / after.dist);
       }
       requestRender();
       return;
@@ -112,7 +119,9 @@ export function attachControls(
     pointers.clear();
   });
 
-  // R key: reset the view.
+  // Keyboard: R resets, arrows pan, plus / minus zoom around the view centre.
+  // The mouse and touch gestures have no other equivalent for someone who
+  // cannot use a pointer.
   window.addEventListener("keydown", (event: KeyboardEvent) => {
     if (shouldIgnoreShortcut(event)) {
       return;
@@ -120,6 +129,38 @@ export function attachControls(
     if (event.key === "r" || event.key === "R") {
       viewport.reset();
       requestRender();
+      return;
+    }
+
+    // Arrows move the VIEW (right arrow = look further right), i.e. the
+    // opposite of dragging the image. panByPixels takes drag deltas.
+    const step = KEY_PAN_FRACTION * Math.min(canvas.clientWidth, canvas.clientHeight);
+    const pans: Record<string, [number, number]> = {
+      ArrowLeft: [step, 0],
+      ArrowRight: [-step, 0],
+      ArrowUp: [0, step],
+      ArrowDown: [0, -step],
+    };
+    const pan = pans[event.key];
+    if (pan) {
+      event.preventDefault();
+      viewport.panByPixels(pan[0], pan[1], canvas.clientWidth, canvas.clientHeight);
+      requestRender();
+      return;
+    }
+
+    // "=" is the unshifted "+" key on most layouts.
+    const zoomIn = event.key === "+" || event.key === "=";
+    const zoomOut = event.key === "-" || event.key === "_";
+    if (zoomIn || zoomOut) {
+      event.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      onZoomBy(
+        rect.left + rect.width / 2,
+        rect.top + rect.height / 2,
+        rect,
+        zoomIn ? KEY_ZOOM_FACTOR : 1 / KEY_ZOOM_FACTOR,
+      );
     }
   });
 }

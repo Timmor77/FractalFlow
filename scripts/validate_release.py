@@ -12,15 +12,16 @@ import argparse
 import csv
 import hashlib
 import json
+import os
 import subprocess
 import sys
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 import numpy as np
 from PIL import Image
 
 from reference_julia import render_mpmath
-
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CASES = ROOT / "paper" / "data" / "validation_cases.json"
@@ -163,6 +164,62 @@ def compare_raw(reference: np.ndarray, candidate: np.ndarray) -> dict[str, float
     }
 
 
+# The reference's own escape times, archived next to its PNG. The CUDA harness
+# compares against them in memory; the browser harness (src/bench/validate.ts)
+# has no mpmath, so it reads this file. Same layout as the CUDA --raw dump:
+# width*height little-endian float32, row-major from the top, -1 for interior.
+def save_reference_raw(raw: np.ndarray, out_dir: Path, case_id: str) -> Path:
+    path = out_dir / f"{case_id}_reference.f32"
+    raw.astype("<f4").tofile(path)
+    return path
+
+
+def render_reference_only(case: dict[str, object], out_dir: Path) -> dict[str, object]:
+    """Render one case with mpmath alone and archive its raw escape times.
+
+    Needs no CUDA binary. The reference PNG is evidence already in the
+    repository, so it is compared, never rewritten: a mismatch means this run
+    does not reproduce the archived reference and its raw grid must not be
+    trusted either.
+    """
+    case_id = str(case["id"])
+    image, raw = render_mpmath(
+        dd_from_decimal(str(case["center_re"])),
+        dd_from_decimal(str(case["center_im"])),
+        float(case["scale"]),
+        float(case["c_re"]),
+        float(case["c_im"]),
+        int(case["max_iter"]),
+        int(case["width"]),
+        int(case["height"]),
+        int(case["dps"]),
+        with_raw=True,
+    )
+    png_path = out_dir / f"{case_id}_reference.png"
+    if png_path.exists():
+        archived = np.asarray(Image.open(png_path).convert("RGB"))
+        reproduces = bool(np.array_equal(archived, image))
+    else:
+        Image.fromarray(image).save(png_path)
+        reproduces = True
+    raw_path = save_reference_raw(raw, out_dir, case_id) if reproduces else None
+    return {"id": case_id, "reproduces": reproduces, "raw_path": raw_path}
+
+
+def run_reference_raw(cases: list[dict[str, object]], out_dir: Path) -> int:
+    """All cases in parallel (mpmath is single-threaded and the cases are independent)."""
+    workers = min(len(cases), os.cpu_count() or 1)
+    failures = 0
+    with ProcessPoolExecutor(max_workers=workers) as pool:
+        for result in pool.map(render_reference_only, cases, [out_dir] * len(cases)):
+            if result["reproduces"]:
+                print(f"[{result['id']}] matches the archived reference -> {result['raw_path']}")
+            else:
+                failures += 1
+                print(f"ERROR: [{result['id']}] does not reproduce the archived reference PNG")
+    return failures
+
+
 def render_case(case: dict[str, object], cuda_exe: Path, out_dir: Path) -> dict[str, object]:
     case_id = str(case["id"])
     reference_path = out_dir / f"{case_id}_reference.png"
@@ -187,6 +244,7 @@ def render_case(case: dict[str, object], cuda_exe: Path, out_dir: Path) -> dict[
         with_raw=True,
     )
     Image.fromarray(reference).save(reference_path)
+    save_reference_raw(reference_raw, out_dir, case_id)
 
     command = [
         str(cuda_exe),
@@ -307,10 +365,17 @@ def run_depth_sweep(cases: list[dict[str, object]], cuda_exe: Path, out_dir: Pat
 
     csv_path = out_dir / "depth_sweep.csv"
     with csv_path.open("w", newline="", encoding="utf-8") as stream:
-        writer = csv.DictWriter(stream, fieldnames=list(rows[0]))
+        writer = csv.DictWriter(stream, fieldnames=list(rows[0]), lineterminator="\n")
         writer.writeheader()
         writer.writerows(rows)
     print(f"depth sweep -> {csv_path}")
+
+
+def default_cuda_exe() -> Path:
+    """cuda/julia.exe (Windows build), or cuda/julia when only that one exists."""
+    windows = ROOT / "cuda" / "julia.exe"
+    posix = ROOT / "cuda" / "julia"
+    return posix if posix.exists() and not windows.exists() else windows
 
 
 def main() -> None:
@@ -319,12 +384,18 @@ def main() -> None:
     )
     parser.add_argument("--cases", type=Path, default=DEFAULT_CASES)
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
-    parser.add_argument("--cuda", type=Path, default=ROOT / "cuda" / "julia.exe")
+    parser.add_argument(
+        "--cuda",
+        type=Path,
+        default=default_cuda_exe(),
+        help="CUDA renderer binary (default: cuda/julia.exe, or cuda/julia if only that exists)",
+    )
     parser.add_argument(
         "--case",
         action="append",
         default=[],
-        help="case id to run; repeat to select several (default: all)",
+        help="case id to run; repeat to select several (default: all). A restricted run "
+        "writes validation_results_partial.csv and leaves the frozen matrix alone",
     )
     parser.add_argument(
         "--depth-sweep",
@@ -332,17 +403,26 @@ def main() -> None:
         help="instead of the release matrix, sweep the fixed-point case from 1e-16 to "
         "1e-28 to locate the camera's usable floor (slow: mpmath at 1200 iterations)",
     )
+    parser.add_argument(
+        "--reference-raw",
+        action="store_true",
+        help="render only the mpmath references and archive their raw escape times "
+        "(<case>_reference.f32, read by the browser's /?validate); needs no CUDA binary",
+    )
     args = parser.parse_args()
+
+    cases = json.loads(args.cases.read_text(encoding="utf-8"))
+    args.out.mkdir(parents=True, exist_ok=True)
+
+    if args.reference_raw:
+        sys.exit(1 if run_reference_raw(cases, args.out) else 0)
 
     cuda_exe = args.cuda.resolve()
     if not cuda_exe.exists():
         raise SystemExit(
             f"CUDA renderer not found: {cuda_exe}. Compile it with "
-            "nvcc -O3 cuda/julia.cu -o cuda/julia.exe"
+            "nvcc -O3 cuda/julia.cu -o cuda/julia (julia.exe on Windows), or pass --cuda"
         )
-
-    cases = json.loads(args.cases.read_text(encoding="utf-8"))
-    args.out.mkdir(parents=True, exist_ok=True)
 
     if args.depth_sweep:
         run_depth_sweep(cases, cuda_exe, args.out)
@@ -370,13 +450,21 @@ def main() -> None:
             f"{row['raw_over_tolerance_pct']:.2f}% (max {row['raw_max_abs_iter']:.3f} iter)"
         )
 
-    csv_path = args.out / "validation_results.csv"
+    # validation_results.csv is the frozen matrix behind the report's table: it
+    # must always hold every case. A run restricted with --case goes to a
+    # separate working file instead of truncating it.
+    csv_name = "validation_results_partial.csv" if selected else "validation_results.csv"
+    csv_path = args.out / csv_name
     fieldnames = list(rows[0])
     with csv_path.open("w", newline="", encoding="utf-8") as stream:
-        writer = csv.DictWriter(stream, fieldnames=fieldnames)
+        # The csv module writes CRLF by default; the repository stores LF.
+        writer = csv.DictWriter(stream, fieldnames=fieldnames, lineterminator="\n")
         writer.writeheader()
         writer.writerows(rows)
-    print(f"validation matrix -> {csv_path}")
+    if selected:
+        print(f"partial run ({len(rows)} case(s)) -> {csv_path}; the frozen matrix is untouched")
+    else:
+        print(f"validation matrix -> {csv_path}")
 
     failures = check_thresholds(rows)
     for failure in failures:

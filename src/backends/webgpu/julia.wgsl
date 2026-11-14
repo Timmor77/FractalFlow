@@ -19,14 +19,22 @@
 // neighbouring pixels collapse onto the same delta — blocky glitches from
 // ~1e-5 scales down. As offsets, D[m] and δ are both small exactly when
 // precision matters, so their sum keeps full relative precision.
+//
+// Two fragment entry points share one iteration (`iterate`):
+//   fs     colours the pixel through the palette — what the app draws;
+//   fsRaw  writes the smooth iteration count itself to a float target — what
+//          the validation harness compares, so the palette cannot hide or
+//          invent a difference.
 
 struct Uniforms {
-  resolution : vec2f,
-  scale : f32,      // vertical size of the view in the complex plane
-  aspect : f32,     // width / height
+  resolution : vec2f, // size of the WHOLE image in pixels
+  scale : f32,        // vertical size of the view in the complex plane
+  aspect : f32,       // width / height of the whole image
   maxIter : u32,
-  refLength : u32,  // number of valid points in the reference orbit
-  center : vec2f,   // Z0 rounded to f32 (the orbit below is relative to it)
+  refLength : u32,    // number of valid points in the reference orbit
+  center : vec2f,     // Z0 rounded to f32 (the orbit below is relative to it)
+  origin : vec2f,     // top-left pixel of this draw inside the image; (0, 0)
+                      // on screen, the tile offset in a tiled export
 };
 
 @group(0) @binding(0) var<uniform> u : Uniforms;
@@ -47,10 +55,19 @@ fn vs(@builtin(vertex_index) vi : u32) -> @builtin(position) vec4f {
   return vec4f(pts[vi], 0.0, 1.0);
 }
 
-@fragment
-fn fs(@builtin(position) fragCoord : vec4f) -> @location(0) vec4f {
+// Outcome of one pixel: did the orbit escape, and after how many (smooth)
+// iterations.
+struct Escape {
+  escaped : bool,
+  smoothIter : f32,
+};
+
+fn iterate(fragCoord : vec2f) -> Escape {
   // Pixel position in 0..1, centred, aspect-corrected. Screen y -> complex y.
-  let uv = fragCoord.xy / u.resolution;
+  // fragCoord and origin are both (integer + 0.5)-or-integer values far below
+  // 2^24, so their sum is exact: a tile computes bit-for-bit the coordinates
+  // the same pixels would get in a single full-size draw.
+  let uv = (fragCoord + u.origin) / u.resolution;
   var p = uv - vec2f(0.5, 0.5);
   p.x = p.x * u.aspect;
   p.y = -p.y;
@@ -66,11 +83,17 @@ fn fs(@builtin(position) fragCoord : vec4f) -> @location(0) vec4f {
   var zx = 0.0;
   var zy = 0.0;
 
+  // D[m] is carried from one iteration to the next instead of being read
+  // again: the rebasing test below already fetches D[m + 1], which is exactly
+  // the point the next iteration starts from (or D[0] after a rebase). One
+  // storage read per iteration instead of two.
+  let D0 = refOrbit[0];
+  var D = D0;
+
   loop {
     if (iter >= u.maxIter) { break; }
 
     // z_n = Z[m] + δ, with Z[m] = Z0 + D[m]
-    let D = refOrbit[m];
     let Zx = u.center.x + D.x;
     let Zy = u.center.y + D.y;
     zx = Zx + d.x;
@@ -90,25 +113,39 @@ fn fs(@builtin(position) fragCoord : vec4f) -> @location(0) vec4f {
     // is near the reference, so no catastrophic cancellation (see header).
     // min(...): when the reference has a single point (it escapes immediately),
     // m already equals refLength here; without the clamp we would read stale data.
-    let D2 = refOrbit[min(m, u.refLength - 1u)];
-    let fx = D2.x + d.x;
-    let fy = D2.y + d.y;
+    let next = refOrbit[min(m, u.refLength - 1u)];
+    let fx = next.x + d.x;
+    let fy = next.y + d.y;
     if ((fx * fx + fy * fy) < (d.x * d.x + d.y * d.y) || m >= u.refLength - 1u) {
       d = vec2f(fx, fy);
       m = 0u;
+      D = D0;
+    } else {
+      D = next;
     }
   }
 
-  // Point inside the set: black.
   if (!escaped) {
+    return Escape(false, 0.0);
+  }
+
+  // Smooth iteration count: avoids discrete bands.
+  let mag2 = zx * zx + zy * zy;
+  let nu = log2(0.5 * log2(mag2));           // log2(log2(|z|))
+  return Escape(true, f32(iter) + 1.0 - nu);
+}
+
+@fragment
+fn fs(@builtin(position) fragCoord : vec4f) -> @location(0) vec4f {
+  let pixel = iterate(fragCoord.xy);
+
+  // Point inside the set: black.
+  if (!pixel.escaped) {
     return vec4f(0.0, 0.0, 0.0, 1.0);
   }
 
-  // Smooth colouring (smooth iteration count): avoids discrete bands.
   // NB: `smooth` is a reserved WGSL word, hence the name smoothIter.
-  let mag2 = zx * zx + zy * zy;
-  let nu = log2(0.5 * log2(mag2));           // log2(log2(|z|))
-  let smoothIter = f32(iter) + 1.0 - nu;
+  let smoothIter = pixel.smoothIter;
   // Sample the LUT; the "repeat" sampler makes the palette cycle.
   // Log-damped colour density (identical in GLSL/CUDA/Python): a linear
   // t = smoothIter * 0.02 cycles the palette several times per pixel in dense
@@ -117,4 +154,13 @@ fn fs(@builtin(position) fragCoord : vec4f) -> @location(0) vec4f {
   let t = 5.545 * log2(1.0 + smoothIter / 400.0);
   let rgb = textureSampleLevel(paletteLut, paletteSampler, vec2f(t, 0.5), 0.0).rgb;
   return vec4f(rgb, 1.0);
+}
+
+// Raw output for validation: the smooth iteration count in the red channel of
+// a float target, -1 for interior pixels (the same sentinel as the CUDA --raw
+// dump and the Python reference).
+@fragment
+fn fsRaw(@builtin(position) fragCoord : vec4f) -> @location(0) vec4f {
+  let pixel = iterate(fragCoord.xy);
+  return vec4f(select(-1.0, pixel.smoothIter, pixel.escaped), 0.0, 0.0, 1.0);
 }

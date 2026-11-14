@@ -33,7 +33,7 @@ export function ddToNumber(a: Dd): number {
 function twoSum(a: number, b: number): [number, number] {
   const s = a + b;
   const bb = s - a;
-  const e = (a - (s - bb)) + (b - bb);
+  const e = a - (s - bb) + (b - bb);
   return [s, e];
 }
 
@@ -58,7 +58,7 @@ function twoProd(a: number, b: number): [number, number] {
   const bhi = cb - (cb - b);
   const blo = b - bhi;
 
-  const e = ((ahi * bhi - p) + ahi * blo + alo * bhi) + alo * blo;
+  const e = ahi * bhi - p + ahi * blo + alo * bhi + alo * blo;
   return [p, e];
 }
 

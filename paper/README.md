@@ -26,7 +26,8 @@ nvcc -O3 cuda/julia.cu -o cuda/julia.exe
 
 # Six independent mpmath-vs-CUDA validation cases, and the release gate.
 # Compares colours and raw escape times (julia.exe --raw); the .f32 dumps are
-# working files, the CSV is the artefact.
+# working files, the CSV is the artefact. With --case <id> the run goes to
+# validation_results_partial.csv and the frozen matrix is left alone.
 uv --cache-dir .uv-cache run python scripts/validate_release.py
 
 # Where the pipeline stops agreeing (sets the camera floor, ~20 min)
@@ -40,6 +41,11 @@ Copy-Item artifacts/cpu_bench.csv paper/data/benchmark/cpu_bench.csv
 # How much of the iteration cap the benchmark views actually use (~12 min).
 # Section 6.2 uses this to correct the upper-bound GIter/s convention.
 uv --cache-dir .uv-cache run python scripts/reference_julia.py --escape-stats
+
+# The references' raw escape times (<case>_reference.f32), read by the
+# browser harness. mpmath only, no CUDA; each case is checked against its
+# archived PNG, and the six run in parallel (seconds, not minutes).
+uv --cache-dir .uv-cache run python scripts/validate_release.py --reference-raw
 
 # Browser artefacts: start the app, then
 #   /?bench=webgpu  -> save the CSV as paper/data/benchmark/webgpu_bench.csv
@@ -55,11 +61,30 @@ re-run on unchanged inputs reproduces the hashes recorded in
 `generated/manifest.json` byte for byte. A hash mismatch means the data
 changed, not that the plot was redrawn.
 
+Text files (CSV, LaTeX tables) are hashed with LF line endings, which is how
+the repository stores them (`.gitattributes`): the manifest therefore matches
+any clone, including a Windows one where the tools write CRLF. To verify the
+archived files without regenerating anything:
+
+```powershell
+uv --cache-dir .uv-cache run python paper/generate_figures.py --check
+```
+
 Both browser pages write a machine-readable record to the developer console
 (`FRACTALFLOW_BENCH_RESULTS`, `FRACTALFLOW_VALIDATION_RESULTS`) in addition to
 their download button. Keep the CSV header lines: they record the adapter,
 browser, resolution, warm-up count and timing method, which is the only thing
 tying a number to the machine that produced it.
+
+`/?validate` compares raw escape times: the shader's second output against
+`data/validation/<case>_reference.f32`, with a PASS/FAIL verdict per case, and
+reports the colour difference as a secondary figure. Two records exist:
+
+- `data/validation/webgpu_validation.csv` — RTX 3060 Ti, the machine of every
+  other number in the report. It was recorded with the earlier, colour-only
+  harness and the earlier palette table, and still has to be re-measured.
+- `data/validation/webgpu_validation_apple_m5_pro.csv` — the current harness on
+  a second machine (Apple M5 Pro, Metal). Not used by the report.
 
 `data/validation/depth_sweep.csv` is a measurement, not a gate — it is what
 sets the `1e-20` camera floor in `src/core/config.ts`. If it is ever re-run

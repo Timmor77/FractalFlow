@@ -1,6 +1,6 @@
 [project]
 name = "fractal-flow-tools"
-version = "1.1.0"
+version = "1.2.0"
 description = "Reference rendering and benchmark tools for FractalFlow"
 license = "Apache-2.0"
 requires-python = ">=3.12"
@@ -12,4 +12,16 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = []
+dev = [
+    "ruff>=0.17.5",
+]
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+# Where first-party modules live (the scripts import each other by name).
+src = ["scripts", "paper"]
+
+[tool.ruff.lint]
+# Errors, pyflakes, import order, modern syntax, likely bugs.
+select = ["E", "F", "I", "UP", "B"]

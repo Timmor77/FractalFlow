@@ -2,7 +2,7 @@
   "name": "fractalflow",
   "private": true,
   "version": "1.2.0",
-  "description": "Deep-zoom Julia set explorer — one perturbation-theory algorithm rendered in WebGPU, WebGL2 and CUDA",
+  "description": "Deep-zoom Julia set explorer \u2014 one perturbation-theory algorithm rendered in WebGPU, WebGL2 and CUDA",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
@@ -27,12 +27,26 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "typecheck": "tsc",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "check": "npm run typecheck && npm run lint && npm run format:check && npm test"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@webgpu/types": "^0.1.71",
+    "eslint": "^10.15.0",
+    "prettier": "^3.10.1",
     "typescript": "~6.0.2",
+    "typescript-eslint": "^8.72.2",
     "vite": "^8.1.0",
     "vitest": "^4.1.10"
+  },
+  "overrides": {
+    "@typescript-eslint/typescript-estree": {
+      "minimatch": "^11.0.8"
+    }
   }
 }

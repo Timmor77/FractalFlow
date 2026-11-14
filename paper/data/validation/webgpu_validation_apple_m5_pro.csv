@@ -1,0 +1,14 @@
+# backend: WebGPU (f32 deltas) vs the mpmath references in paper/data/validation/
+# adapter: apple / metal-3
+# machine: Apple M5 Pro, macOS 26.6.2 (a second machine: the report's figures come from the RTX 3060 Ti)
+# browser: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Claude/5.11492.5 Chrome/156.0.8078.75 Safari/537.36
+# regenerate: npm run dev, then open /?validate
+# gate: medianAbsIter <= 0.01, offByOne <= 15% of pixels, interiorFlips <= 3% of pixels
+# overTolerance counts escape times more than 0.01 iteration off; offByOne, more than 1
+id,scale,maxIter,pixels,interiorFlips,overTolerance,offByOne,medianAbsIter,maxAbsIter,meanAbsRgb,maxAbsRgb,differingPixels,worseThan4,verdict
+overview,3.000000e+0,300,4096,16,88,16,1.192e-7,18.674,1.262695,244,3550,42,PASS
+off_center,3.000000e-1,1100,4096,1,789,367,1.526e-5,649.348,8.196940,255,3536,422,PASS
+deep_zoom,1.000000e-5,700,4096,0,3,1,0.000e+0,12.962,0.323975,78,3000,2,PASS
+fixed_point,1.000000e-10,400,4096,0,59,1,6.104e-5,1.044,0.338135,12,2446,1,PASS
+below_binary64,1.000000e-16,700,4096,39,436,54,2.441e-4,96.457,1.468018,252,3045,107,PASS
+deepest_validated,1.000000e-20,1200,4096,83,985,418,4.272e-4,406.823,10.465495,255,3572,517,PASS

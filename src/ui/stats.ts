@@ -45,8 +45,7 @@ export class StatsOverlay {
 
   public update(data: StatsData): void {
     // The "ref orbit" line only makes sense for perturbation (WebGPU).
-    const refLine =
-      data.refLength > 0 ? `<div>ref orbit: ${data.refLength}</div>` : "";
+    const refLine = data.refLength > 0 ? `<div>ref orbit: ${data.refLength}</div>` : "";
 
     const fpsLine = data.fps > 0 ? `<div>fps: ${data.fps.toFixed(0)}</div>` : "";
     const limitLine = data.atMaxDepth

@@ -53,3 +53,6 @@ __pycache__/
 *.py[cod]
 paper/data/validation/sweep/
 paper/data/validation/*.f32
+# ...except the mpmath references' own escape times, which the browser reads.
+!paper/data/validation/*_reference.f32
+paper/data/validation/validation_results_partial.csv

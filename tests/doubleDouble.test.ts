@@ -96,9 +96,7 @@ describe("BigInt ground truth", () => {
       const a: Dd = { hi: aHi, lo: aLo };
       const b: Dd = { hi: bHi, lo: bLo };
       const sum = ddAdd(a, b);
-      expect(ddToBigInt(sum)).toBe(
-        BigInt(aHi) + BigInt(aLo) + BigInt(bHi) + BigInt(bLo),
-      );
+      expect(ddToBigInt(sum)).toBe(BigInt(aHi) + BigInt(aLo) + BigInt(bHi) + BigInt(bLo));
     }
   });
 });
@@ -113,7 +111,7 @@ describe("algebraic identities", () => {
 
   it("a - b === -(b - a)", () => {
     const a: Dd = { hi: 0.1, lo: 5.551115123125783e-18 };
-    const b: Dd = { hi: 0.3, lo: -1.6653345369377348e-17 };
+    const b: Dd = { hi: 0.3, lo: -1.6653345369377347e-17 };
     const d1 = ddSub(a, b);
     const d2 = ddSub(b, a);
     expect(d1.hi).toBe(-d2.hi);

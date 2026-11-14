@@ -78,7 +78,10 @@ def main() -> None:
             data[stem] = read_csv(path)
             peak_giter = max(r["giter"] for r in data[stem])
             peak_mpix = max(r["mpix"] for r in data[stem])
-            print(f"{label:28s} peak {peak_giter:7.2f} GIter/s, {peak_mpix:8.1f} Mpix/s ({len(data[stem])} depths)")
+            print(
+                f"{label:28s} peak {peak_giter:7.2f} GIter/s, {peak_mpix:8.1f} Mpix/s "
+                f"({len(data[stem])} depths)"
+            )
         else:
             print(f"{label:28s} (no {path}, skipped)")
 

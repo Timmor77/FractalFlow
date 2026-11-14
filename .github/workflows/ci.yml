@@ -15,6 +15,9 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: npm run lint
+      - run: npm run format:check
+      # build = type-check (tsc) + production bundle
       - run: npm run build
       - run: npm test
 
@@ -26,4 +29,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
+      - run: uv run ruff check scripts paper
       - run: uv run python scripts/reference_julia.py --selftest
+      # Re-derive the six arbitrary-precision references from source (mpmath
+      # only) and compare each with the PNG archived in the repository: the
+      # evidence the GPU backends are measured against must be reproducible.
+      - run: uv run python scripts/validate_release.py --reference-raw
+      # The report's manifest must describe the files actually in the
+      # repository: this fails if a data file or a generated table changed
+      # without the manifest, or the other way round.
+      - run: uv run python paper/generate_figures.py --check

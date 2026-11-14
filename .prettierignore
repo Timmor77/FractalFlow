@@ -1,0 +1,13 @@
+# Generated or vendored: not ours to format.
+dist
+node_modules
+package-lock.json
+uv.lock
+artifacts
+cuda/stb_image_write.h
+
+# Frozen evidence and the report: their bytes are hashed or archived.
+paper
+
+# Prose is wrapped by hand.
+*.md

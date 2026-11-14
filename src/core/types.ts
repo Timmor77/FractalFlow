@@ -29,6 +29,21 @@ export type ViewState = {
   paletteLut: Uint8Array;
 };
 
+// Size of a whole image, in pixels.
+export type ImageSize = {
+  width: number;
+  height: number;
+};
+
+// A rectangle of a larger image: top-left corner and size, in pixels, with y
+// growing downwards (image convention).
+export type Tile = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
 // What a render returns, for the stats overlay.
 export type RenderInfo = {
   // CPU time spent preparing/submitting the frame, in milliseconds.
@@ -57,8 +72,11 @@ export interface Renderer {
   // (fast render during interaction); 1 = full resolution.
   resize(qualityScale?: number): void;
 
-  // Renders the view off-screen at the requested size (full quality) and
-  // returns the image as PNG. Used by "save image": we can target much larger
-  // than the screen. The canvas is restored to its display size right after.
-  capture(view: ViewState, width: number, height: number): Promise<Blob>;
+  // Renders one tile of a `image`-sized picture of the view, off-screen, and
+  // returns its pixels: tightly packed RGBA, rows from the top. The result is
+  // exactly what those pixels would be in a single draw of the whole image, so
+  // tiles can be assembled into pictures far larger than the screen — or than
+  // the GPU's biggest texture (see export/exportImage.ts). The promise resolves
+  // once the GPU has finished the tile.
+  renderTile(view: ViewState, image: ImageSize, tile: Tile): Promise<Uint8Array>;
 }

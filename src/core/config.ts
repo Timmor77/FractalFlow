@@ -49,16 +49,34 @@ export const INTERACTIVE_RES_MAX = 1.0; // ceiling (full resolution)
 
 // Per-frame time thresholds (ms) driving the adaptation:
 // above SLOW we reduce resolution, below FAST we raise it back.
+// These are floors, suited to displays faster than ~75 Hz. On a slower display
+// no frame can ever beat FAST, so core/resolutionGovernor.ts widens both to a
+// multiple of the display's own frame interval.
 export const FRAME_SLOW_MS = 20; // < 50 fps -> lighten the load
 export const FRAME_FAST_MS = 13; // > ~75 fps -> we can afford sharper
+
+// Consecutive on-time frames required before each step back up.
+export const RES_RAISE_AFTER_FRAMES = 4;
 
 // Idle delay without input before the final sharp render pass (ms).
 export const IDLE_DELAY_MS = 110;
 
 // --- Image export ---
-// Target longest side (px) for the "full quality" PNG export. The backend then
-// clamps it to the GPU's max texture size (preserving aspect).
-export const EXPORT_MAX_SIDE = 8192;
+// Longest side (px) offered for the PNG export; the other side follows the
+// screen's aspect ratio. The export is rendered in tiles and encoded as a
+// stream (see export/exportImage.ts), so 16K is fine even though it is twice
+// the largest texture a default WebGPU device can create.
+export const EXPORT_SIZES = [
+  { label: "4K", side: 3840 },
+  { label: "8K", side: 7680 },
+  { label: "16K", side: 15360 },
+] as const;
+export const DEFAULT_EXPORT_SIZE = 1; // 8K
+
+// Side of an export tile (px). Small enough that one tile at the iteration cap
+// stays far below a driver watchdog even on integrated graphics, large enough
+// that the per-tile overhead (submission, readback) does not dominate.
+export const EXPORT_TILE_SIZE = 512;
 
 // --- Intro animation ---
 // On load, the view starts slightly zoomed out then eases into the default

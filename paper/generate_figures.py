@@ -2,10 +2,14 @@
 
 Figures are written without a PDF creation date so that a re-run on unchanged
 inputs reproduces the byte-identical files listed in generated/manifest.json.
+
+``--check`` regenerates nothing: it re-hashes the files listed in the manifest
+and fails if one of them no longer matches (this is what CI runs).
 """
 
 from __future__ import annotations
 
+import argparse
 import csv
 import hashlib
 import json
@@ -18,7 +22,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.patches import FancyArrowPatch, FancyBboxPatch
 from PIL import Image
-
 
 PAPER = Path(__file__).resolve().parent
 DATA = PAPER / "data"
@@ -43,12 +46,18 @@ COLORS = {
 }
 
 
+# Text artefacts are hashed with LF line endings whatever is on disk. The CSVs
+# come out of tools that write CRLF on Windows (text-mode fopen, Python's csv
+# module), while the repository stores LF: hashing the raw bytes made the
+# manifest match on the machine that produced it and on no clone of it.
+TEXT_SUFFIXES = {".csv", ".tex", ".json"}
+
+
 def sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for block in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
+    data = path.read_bytes()
+    if path.suffix in TEXT_SUFFIXES:
+        data = data.replace(b"\r\n", b"\n")
+    return hashlib.sha256(data).hexdigest()
 
 
 def read_benchmark_csv(path: Path) -> list[dict[str, float]]:
@@ -412,7 +421,7 @@ def write_validation_table() -> Path:
         )
     lines.extend([r"\bottomrule", r"\end{tabular}", ""])
     path = GENERATED / "validation_table.tex"
-    path.write_text("\n".join(lines), encoding="utf-8")
+    path.write_text("\n".join(lines), encoding="utf-8", newline="\n")
     return path
 
 
@@ -436,7 +445,7 @@ def write_benchmark_table(data: dict[str, list[dict[str, float]]]) -> Path:
         )
     lines.extend([r"\bottomrule", r"\end{tabular}", ""])
     path = GENERATED / "benchmark_table.tex"
-    path.write_text("\n".join(lines), encoding="utf-8")
+    path.write_text("\n".join(lines), encoding="utf-8", newline="\n")
     return path
 
 
@@ -453,11 +462,40 @@ def write_manifest(inputs: list[Path], outputs: list[Path]) -> Path:
         },
     }
     path = GENERATED / "manifest.json"
-    path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8", newline="\n")
     return path
 
 
+def check_manifest() -> int:
+    """Re-hash every file listed in the manifest; return the number of mismatches."""
+    manifest = json.loads((GENERATED / "manifest.json").read_text(encoding="utf-8"))
+    problems: list[str] = []
+    checked = 0
+    for group in ("inputs", "outputs"):
+        for relative, expected in manifest[group].items():
+            path = PAPER / relative
+            checked += 1
+            if not path.exists():
+                problems.append(f"{relative}: listed in the manifest but missing")
+            elif sha256(path) != expected:
+                problems.append(f"{relative}: content differs from the manifest")
+    for problem in problems:
+        print(f"ERROR: {problem}")
+    print(f"manifest: {checked - len(problems)}/{checked} files match")
+    return len(problems)
+
+
 def main() -> None:
+    parser = argparse.ArgumentParser(description="Generate the report's figures and tables")
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="verify the archived files against generated/manifest.json without regenerating",
+    )
+    args = parser.parse_args()
+    if args.check:
+        raise SystemExit(1 if check_manifest() else 0)
+
     FIGURES.mkdir(parents=True, exist_ok=True)
     GENERATED.mkdir(parents=True, exist_ok=True)
 

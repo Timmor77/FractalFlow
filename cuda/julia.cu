@@ -307,6 +307,15 @@ static bool argFlag(int argc, char** argv, const char* key) {
   return false;
 }
 
+// Rejects sizes the kernel cannot run with (atof turns a typo into 0, which
+// would otherwise surface as a division by zero or an empty allocation).
+static void requirePositive(const char* name, double value) {
+  if (!(value > 0.0)) {
+    fprintf(stderr, "invalid %s: must be a positive number\n", name);
+    exit(1);
+  }
+}
+
 // Benchmark mode: throughput at increasing depths. Writes a CSV.
 static void runBenchmark(int argc, char** argv) {
   int W = (int)argNum(argc, argv, "--w", 1920);
@@ -316,6 +325,16 @@ static void runBenchmark(int argc, char** argv) {
   // Boundary centre for long orbits (realistic deep-zoom scenario).
   dd cx = dd_from_string(argStr(argc, argv, "--re", "0.76"));
   dd cy = dd_from_string(argStr(argc, argv, "--im", "0.24"));
+  requirePositive("--w", W);
+  requirePositive("--h", H);
+
+  // Open the output first: a benchmark that cannot be saved is not worth the
+  // minutes it takes. Binary mode so Windows writes LF like everyone else (the
+  // repository stores LF, and the report's manifest hashes these files).
+  const char* csvPath = argStr(argc, argv, "--out", "../artifacts/cuda_bench.csv");
+  FILE* csv = fopen(csvPath, "wb");
+  if (!csv) { fprintf(stderr, "cannot write %s\n", csvPath); exit(1); }
+  fprintf(csv, "scale,maxIter,ms,GIterPerSec,MpixPerSec\n");
 
   double* hZx = (double*)malloc(sizeof(double) * 200000);
   double* hZy = (double*)malloc(sizeof(double) * 200000);
@@ -324,10 +343,6 @@ static void runBenchmark(int argc, char** argv) {
   CUDA_CHECK(cudaMalloc(&dZx, sizeof(double) * 200000));
   CUDA_CHECK(cudaMalloc(&dZy, sizeof(double) * 200000));
   CUDA_CHECK(cudaMalloc(&dOut, (size_t)W * H * 3));
-
-  const char* csvPath = argStr(argc, argv, "--out", "../artifacts/cuda_bench.csv");
-  FILE* csv = fopen(csvPath, "w");
-  if (csv) fprintf(csv, "scale,maxIter,ms,GIterPerSec,MpixPerSec\n");
 
   printf("Benchmark %dx%d, c=%.4f%+.4fi (RTX / CUDA)\n", W, H, jcx, jcy);
   printf("%-12s %8s %9s %11s %11s\n", "scale", "iter", "ms", "GIter/s", "Mpix/s");
@@ -349,12 +364,13 @@ static void runBenchmark(int argc, char** argv) {
     double giter = (pixels * maxIter) / (ms * 1e-3) / 1e9;  // upper bound (max iterations)
     double mpix = pixels / (ms * 1e-3) / 1e6;
     printf("%-12.2e %8d %9.2f %11.2f %11.1f\n", scale, maxIter, ms, giter, mpix);
-    if (csv) fprintf(csv, "%.6e,%d,%.3f,%.3f,%.1f\n", scale, maxIter, ms, giter, mpix);
+    fprintf(csv, "%.6e,%d,%.3f,%.3f,%.1f\n", scale, maxIter, ms, giter, mpix);
 
     scale *= 0.1;  // one step deeper
   }
 
-  if (csv) { fclose(csv); printf("CSV -> %s\n", csvPath); }
+  fclose(csv);
+  printf("CSV -> %s\n", csvPath);
   free(hZx); free(hZy);
   cudaFree(dZx); cudaFree(dZy); cudaFree(dOut);
 }
@@ -373,6 +389,10 @@ static void runRender(int argc, char** argv) {
   // --raw: also dump the smooth iteration count as W*H little-endian float32,
   // for a comparison that owes nothing to the palette (see scripts/validate_release.py).
   const char* rawPath = argStr(argc, argv, "--raw", nullptr);
+  requirePositive("--w", W);
+  requirePositive("--h", H);
+  requirePositive("--iter", maxIter);
+  requirePositive("--scale", scale);
 
   double* hZx = (double*)malloc(sizeof(double) * maxIter);
   double* hZy = (double*)malloc(sizeof(double) * maxIter);
@@ -388,7 +408,12 @@ static void runRender(int argc, char** argv) {
 
   unsigned char* hOut = (unsigned char*)malloc((size_t)W * H * 3);
   CUDA_CHECK(cudaMemcpy(hOut, dOut, (size_t)W * H * 3, cudaMemcpyDeviceToHost));
-  stbi_write_png(out, W, H, 3, hOut, W * 3);
+  // stbi returns 0 on failure (missing directory, read-only path): without
+  // this check the run would report success and leave no image behind.
+  if (!stbi_write_png(out, W, H, 3, hOut, W * 3)) {
+    fprintf(stderr, "cannot write %s\n", out);
+    exit(1);
+  }
 
   if (rawPath) {
     float* hRaw = (float*)malloc((size_t)W * H * sizeof(float));

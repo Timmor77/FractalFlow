@@ -42,7 +42,39 @@ export function computeReferenceOrbit(
   maxIter: number,
 ): ReferenceOrbit {
   const data = new Float32Array(maxIter * 2);
+  const length = fillReferenceOrbit(data, centerX, centerY, cx, cy, maxIter);
+  return { data, length };
+}
 
+// A reference orbit whose storage is allocated once, for the iteration cap,
+// and overwritten by each compute(). Panning recomputes the orbit every frame:
+// this keeps that from allocating a fresh array each time.
+export class OrbitBuffer {
+  public readonly data: Float32Array;
+  public length = 0;
+
+  constructor(capacity: number) {
+    this.data = new Float32Array(capacity * 2);
+  }
+
+  public compute(centerX: Dd, centerY: Dd, cx: number, cy: number, maxIter: number): void {
+    if (maxIter * 2 > this.data.length) {
+      throw new RangeError(`maxIter ${maxIter} exceeds the orbit buffer capacity`);
+    }
+    this.length = fillReferenceOrbit(this.data, centerX, centerY, cx, cy, maxIter);
+  }
+}
+
+// Writes the orbit into `data` (at least maxIter * 2 floats) and returns the
+// number of points computed. Entries past that count are left untouched.
+function fillReferenceOrbit(
+  data: Float32Array,
+  centerX: Dd,
+  centerY: Dd,
+  cx: number,
+  cy: number,
+  maxIter: number,
+): number {
   // Z starts at the view centre.
   let zx = centerX;
   let zy = centerY;
@@ -85,5 +117,5 @@ export function computeReferenceOrbit(
     zy = nextY;
   }
 
-  return { data, length };
+  return length;
 }

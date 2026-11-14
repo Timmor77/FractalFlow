@@ -108,8 +108,12 @@ function sampleStops(stops: Stop[], t: number): [number, number, number] {
 export function buildPaletteLut(palette: Palette, size = 256): Uint8Array {
   const lut = new Uint8Array(size * 4);
   for (let i = 0; i < size; i++) {
-    // i/size (not size-1): the palette wraps around onto itself.
-    const [r, g, b] = sampleStops(palette.stops, i / size);
+    // Texel i is sampled by the GPU at its CENTRE, (i + 0.5) / size: storing
+    // the colour of position i / size instead shifts the whole palette by half
+    // a texel against the analytic gradient of the CUDA and Python renderers
+    // (about one 8-bit level on average for the default palette).
+    // Dividing by size, not size - 1: the palette wraps around onto itself.
+    const [r, g, b] = sampleStops(palette.stops, (i + 0.5) / size);
     lut[i * 4] = Math.round(r);
     lut[i * 4 + 1] = Math.round(g);
     lut[i * 4 + 2] = Math.round(b);

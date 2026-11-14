@@ -9,8 +9,8 @@
 
 Interactive, deep-zoom **Julia set explorer**. One algorithm — *perturbation theory* —
 implemented twice, in **WGSL** (WebGPU) and **CUDA C**, with a direct double-single
-**GLSL** renderer as a shallow compatibility fallback. The CUDA output is checked
-pixel-for-pixel against an independent arbitrary-precision reference.
+**GLSL** renderer as a shallow compatibility fallback. Both GPU paths are checked,
+pixel by pixel, against an independent arbitrary-precision reference.
 
 **[▶ Live demo](https://timmor77.github.io/FractalFlow/)** — WebGPU in Chrome/Edge,
 automatic WebGL2 fallback elsewhere.
@@ -33,19 +33,37 @@ automatic WebGL2 fallback elsewhere.
   `f32` deltas) and a native CUDA kernel (`f64` deltas), plus a WebGL2
   compatibility renderer that iterates directly and is *not* part of the
   deep-zoom pipeline.
-- **Validated, not eyeballed**: CUDA renders are compared pixel-for-pixel against an
-  independent `mpmath` arbitrary-precision implementation — which caught a real
-  off-centre rebasing bug during development, and later a second one in the native
-  path's orbit encoding.
+- **Validated, not eyeballed**: every backend is compared with an independent
+  `mpmath` arbitrary-precision implementation, on the raw escape times as well as
+  the colours — which caught a real off-centre rebasing bug during development,
+  and later a second one in the native path's orbit encoding
+  ([Correctness](#correctness)).
+- **16K export from the browser**: the picture is rendered in tiles and encoded
+  by a streaming PNG encoder written for the purpose, so its size is not bounded
+  by the GPU's largest texture — 15360×8640 on a device whose limit is 8192 — and
+  a tiled export is pixel-identical to a single draw ([Export](#export)).
 - **Measured**: a nominal 1 168 GIter/s in the browser on an RTX 3060 Ti. That
   convention charges every pixel the full iteration cap; the machine really issues
   about 7% of it ([benchmarks below](#benchmarks)).
+- **Reproducible**: frozen measurements with a hashed manifest, a
+  [technical report](paper/main.pdf) built from them, 84 unit tests, and a CI
+  that lints, type-checks, tests and re-verifies the archived evidence.
+
+<p align="center">
+  <img src="docs/app.jpg" width="760"
+       alt="The app at ×150 000 zoom: stats overlay, palettes, Mandelbrot c-picker, export size">
+</p>
+
+*The app at ×150 000, centred on a repelling fixed point. Top left: backend, frame
+time, reference-orbit length. Bottom right: palettes, a mini-Mandelbrot map to pick
+the Julia parameter `c`, PNG export, shareable link.*
 
 ## Gallery
 
 <p align="center">
+  <!-- Light preview (the full plate is 5.7 MB); the link opens the original. -->
   <a href="docs/renders/hero-4k.png">
-    <img src="docs/renders/hero-4k.png" width="820"
+    <img src="docs/renders/hero-preview.jpg" width="820"
          alt="Julia set at c = 0.285 + 0.01i, magnified 3e11 times around a repelling fixed point">
   </a>
 </p>
@@ -126,29 +144,65 @@ src/
     doubleDouble.ts     # double-double arithmetic (TwoSum / Dekker TwoProd)
     viewport.ts         # camera: DD centre, inertial zoom-at-cursor, pan
     referenceOrbit.ts   # perturbation reference orbit (shared idea across backends)
+    frameLoop.ts        # render on demand: reduced resolution in motion, one sharp frame at rest
+    resolutionGovernor.ts  # that resolution, paced on the display's frame time
+    urlState.ts         # shareable view <-> URL hash
     types.ts            # Renderer interface + ViewState
-    config.ts           # shared constants (c, iteration counts)
+    config.ts           # shared constants (c, iteration counts, export sizes)
   backends/
     webgpu/             # primary: perturbation fragment shader in WGSL (f32)
     webgl/              # fallback: direct double-single shader in GLSL + driver probe
-  bench/                # reproducible in-browser benchmark harness (open /?bench)
+  export/               # tiled export: tile layout, streaming PNG encoder, orchestration
+  bench/                # in-browser benchmark (/?bench) and validation (/?validate) harnesses
   controls/             # wheel / drag / pinch / keyboard → viewport
-  ui/                   # palettes, Mandelbrot c-picker, stats overlay, panel
-  main.ts               # picks WebGPU, falls back to WebGL2, runs the loop
+  ui/                   # palettes, Mandelbrot c-picker, stats overlay, panel, messages
+  main.ts               # picks WebGPU, falls back to WebGL2, wires the modules
 cuda/
   julia.cu              # native renderer + benchmark (DD host orbit, f64 deltas)
 scripts/
   reference_julia.py    # mpmath ground-truth renderer (validation) + CPU baseline
+  validate_release.py   # the release matrix: CUDA vs mpmath, with thresholds
   benchmark.py          # benchmark CSVs → summary + charts
   make_zoom_gif.py      # renders the hero GIF via the CUDA backend
-tests/                  # vitest suite for the math core
+paper/                  # technical report: source, frozen data, generated figures
+tests/                  # vitest suite (math core, camera, export, encoder, loop)
 ```
+
+A backend implements one small interface (`Renderer` in
+[`core/types.ts`](src/core/types.ts)): draw the view on the canvas, and draw one
+tile of a larger picture off-screen. Everything else — camera, loop, export, UI —
+is backend-agnostic and unit-tested without a GPU.
 
 | Backend | Delta precision | Zoom floor | Role |
 |---------|-----------------|------------|------|
 | WebGPU  | `f32`, DD centre, relative orbit | `1e-20` (validated depth of the shared pipeline) | Primary browser renderer |
 | CUDA    | `double`, DD centre, relative orbit | `1e-20`, exact match at `1e-16`, degrades past `1e-24` | Native renderer + benchmark |
 | WebGL2  | double-single (`f32²`), direct iteration, no perturbation | `1e-13`, or `1e-4` when the start-up probe finds the compensated arithmetic optimised away | Shallow compatibility fallback, outside the validated pipeline |
+
+## Export
+
+"Save image" produces a PNG of the current view at 4K, 8K or 16K (longest side).
+Drawing 132 million pixels at up to 4 000 iterations each in one draw call is not an
+option: it would keep the GPU busy for seconds — long enough for a driver watchdog to
+reset it on modest hardware — and a 16K render target does not exist on a device whose
+largest texture is 8192. So the export never holds the picture whole:
+
+- the GPU draws **512-pixel tiles** into a small off-screen target. The shader maps
+  pixels from the full image size plus the tile's origin; both are small integers, so
+  the sum is exact in `f32` and a tile gets bit-for-bit the coordinates of a single
+  full-size draw;
+- tiles are gathered into a horizontal band, handed to a **streaming PNG encoder**
+  ([`src/export/pngEncoder.ts`](src/export/pngEncoder.ts): adaptive row filtering,
+  chunking and CRC written here, deflate from the platform's `CompressionStream`),
+  and dropped. Peak memory is one band plus the compressed output;
+- the interactive loop is paused meanwhile, progress is shown on the button, and the
+  export can be cancelled (`Esc`).
+
+Measured on both backends: a tiled export and a single-draw export of the same view
+differ by **zero pixels**, and the browser's own PNG decoder returns exactly the
+pixels that went in. On an Apple M5 Pro a 16K export (15360×8640, 510 tiles) of a
+4 000-iteration view takes 5.7 s and yields a 96 MB file; the device's texture limit
+is 8192.
 
 ## Benchmarks
 
@@ -175,6 +229,12 @@ f32) vs **70.8 GIter/s / 17.7 Mpix/s** (CUDA, f64), against **0.023 GIter/s** fo
 vectorized NumPy float64. The nominal CPU→GPU ratio is ~51 000×, but NumPy has no
 early exit while the GPU rate charges iterations that never ran — correcting for
 that (see below) puts the honest ratio nearer ~2 000×.
+
+These figures were recorded for release 1.2.0. The WGSL loop has since been tightened
+— it reads the reference orbit once per iteration instead of twice, with bit-identical
+output — which lowered frame times by about 10% at the deep end of the schedule on an
+Apple M5 Pro. The RTX 3060 Ti was not re-measured, so the charts above understate the
+current shader by an unknown margin.
 
 <details>
 <summary><b>Methodology & how to reproduce</b></summary>
@@ -227,6 +287,8 @@ uv run python scripts/benchmark.py
 
 ## Correctness
 
+### CUDA against arbitrary precision
+
 The CUDA perturbation renderer is checked pixel-for-pixel against direct
 arbitrary-precision iteration (`mpmath`, 50–90 digits) in six frozen 64×64 cases.
 Each image is 4096 pixels; the release gate fails on a mean above 3 levels, on more
@@ -257,43 +319,90 @@ frozen matrix, the archived
 gracefully: ~3% of pixels wrong at `1e-24`, visibly broken at `1e-28`. That is why the
 camera stops at `1e-20`.
 
-The WebGPU path is now measured too, from the browser: `npm run dev`, then
-`/?validate` re-renders the same cases with the `f32` shader and compares them against
-the same references ([results](paper/data/validation/webgpu_validation.csv)). It is
-measurably looser than CUDA — the `f32` deltas flip 0–2% of pixels between escaped and
-not-escaped, worst at the deepest cases — and most of its whole-image difference comes
-from sampling the palette through a 256-entry LUT rather than evaluating it
-analytically. Interpret the browser as the fast path, CUDA as the accurate one.
+### WebGPU against the same references
 
-Validation caught two real bugs. First, the rebasing step must restart with
-`δ = z − Z₀`, not `δ = z`: the two are only equal when `Z₀ = 0` (the Mandelbrot case),
-so the mistake was invisible at the origin and only showed up in off-centre deep zooms.
-Second, the CUDA kernel used to upload the reference orbit in absolute coordinates,
-which quantised the rebased delta below ~`1e-13`; the `1e-16` case above scores
-3 509 wrong pixels out of 4 096 with that encoding and 0 with the relative one.
+The browser path is measured the same way, on the same quantity. The shader has a
+second output (`fsRaw` in [`julia.wgsl`](src/backends/webgpu/julia.wgsl)) that writes
+each pixel's smooth iteration count to a float target, sharing the iteration with the
+colour path; the references archive their own counts next to each PNG
+(`*_reference.f32`). `npm run dev`, then `/?validate`, renders the six cases, compares
+escape times and prints a verdict:
 
-The CPU-side math core is additionally covered by a [vitest suite](tests/README.md):
-the double-double arithmetic is verified against exact BigInt ground truth
-(`hi + lo === a·b` for 50-bit integer products), and the camera satisfies a
-zoom-at-cursor invariant through full animated zooms.
+| Case | Scale | Interior flips | More than 1 iteration off | Median error (iterations) |
+|---|---|---|---|---|
+| Overview | `3` | 0.39% | 0.39% | 1×10⁻⁷ |
+| Off-centre boundary | `3e-1` | 0.02% | 8.96% | 2×10⁻⁵ |
+| Deep zoom | `1e-5` | 0 | 0.02% | 0 |
+| Repelling fixed point | `1e-10` | 0 | 0.02% | 6×10⁻⁵ |
+| Below binary64 | `1e-16` | 0.95% | 1.32% | 2×10⁻⁴ |
+| Deepest validated | `1e-20` | 2.03% | 10.21% | 4×10⁻⁴ |
+
+*Apple M5 Pro (Metal), Chromium 156 —
+[data](paper/data/validation/webgpu_validation_apple_m5_pro.csv).*
+
+Read it in two parts. The **median** error is at most 4×10⁻⁴ of an iteration: nothing
+is systematically off — an off-by-one in the count or a shifted pixel grid would move
+it to about 1. The **tail** is chaos: near the Julia set a rounding error doubles
+every iteration or so, and a pixel that needs hundreds of iterations to escape has
+forgotten its `f32` low bits long before. The two cases that sit on the boundary at
+high iteration counts therefore have up to 10% of their pixels more than one iteration
+off; CUDA's `f64` deltas, in the same two cases, leave 0.5–0.6% of pixels off by more
+than a hundredth of an iteration. The gate (median ≤ 0.01 iteration,
+≤ 15% of pixels more than one iteration off, ≤ 3% interior flips) is a regression
+test set above these measurements, not a claim that `f32` is exact. Interpret the
+browser as the fast path, CUDA as the accurate one.
+
+The [RTX 3060 Ti record](paper/data/validation/webgpu_validation.csv) cited in the
+report predates this harness: it compares colours only, with the earlier palette
+table, and has not been re-measured.
+
+### What validation caught
+
+Two real bugs. First, the rebasing step must restart with `δ = z − Z₀`, not `δ = z`:
+the two are only equal when `Z₀ = 0` (the Mandelbrot case), so the mistake was
+invisible at the origin and only showed up in off-centre deep zooms. Second, the CUDA
+kernel used to upload the reference orbit in absolute coordinates, which quantised the
+rebased delta below ~`1e-13`; the `1e-16` case above scores 3 509 wrong pixels out of
+4 096 with that encoding and 0 with the relative one.
+
+### Unit tests and CI
+
+Everything that does not need a GPU is covered by a [vitest suite](tests/README.md)
+of 84 tests: the double-double arithmetic against exact BigInt ground truth
+(`hi + lo === a·b` for 50-bit integer products), the camera's zoom-at-cursor invariant
+through full animated zooms, the PNG encoder against a decoder written independently
+from the specification, the tile layout, the render loop on a fake clock, shared
+links, the palette table, and a guard that the constants written by hand in WGSL,
+GLSL, CUDA and Python still agree.
+
+CI runs the linters (ESLint with type information, Prettier, ruff), the type-checker,
+the tests and the production build, then re-derives the arbitrary-precision
+references from source and checks every archived file of the report against its
+manifest. The GPU kernels themselves cannot run on a hosted runner; they are
+validated by the two harnesses above.
 
 ## Run it — browser
 
 ```bash
 npm install
 npm run dev        # open the printed localhost URL
-npm test           # vitest: double-double, viewport, reference orbit
+npm run check      # type-check, lint, format check, tests
 ```
 
 WebGPU is used when available (Chrome, Edge, recent Firefox/Safari); otherwise it falls
 back to WebGL2 automatically. The active backend is shown in the on-screen stats.
 
 **Controls:** mouse wheel = zoom to cursor · click-drag = pan · touch: one finger =
-pan, pinch = zoom · `R` = reset · `S` = save PNG.
+pan, pinch = zoom · keyboard: arrows = pan, `+` / `-` = zoom · `R` = reset ·
+`S` = save PNG (`Esc` cancels).
 
 The bottom-right panel offers colour palettes, a mini-Mandelbrot map to pick the
-Julia `c` (drag the marker or type values), full-quality PNG export (up to 8K), and a
+Julia `c` (drag the marker or type values), PNG export at 4K / 8K / 16K, and a
 **shareable link** — the view (centre, zoom, `c`, palette) lives in the URL hash.
+
+Two more pages, for measurements: `/?bench` (throughput across zoom depths) and
+`/?validate` (WebGPU against the archived references; dev server only, since the
+reference data lives in the repository).
 
 ## Run it — CUDA (NVIDIA)
 
@@ -331,9 +440,17 @@ uv run python scripts/reference_julia.py --bench
 # CPU-only self-check (float64 vs mpmath) — what CI runs:
 uv run python scripts/reference_julia.py --selftest
 
-# Full release matrix (needs cuda/julia.exe), and the depth sweep behind the floor:
+# Full release matrix (needs the CUDA binary), and the depth sweep behind the floor.
+# Adding --case <id> re-runs one case into a separate working file, without
+# touching the frozen matrix:
 uv run python scripts/validate_release.py
 uv run python scripts/validate_release.py --depth-sweep
+
+# Re-derive the references and their raw escape times (mpmath only, no GPU):
+uv run python scripts/validate_release.py --reference-raw
+
+# Check the archived report data against its manifest (what CI runs):
+uv run python paper/generate_figures.py --check
 
 # Benchmark CSVs -> summary + charts:
 uv run python scripts/benchmark.py
@@ -349,17 +466,19 @@ colouring → **WebGPU backend** → **perturbation deep zoom** → **CUDA rende
 benchmark** → **mpmath validation** → interactive `c` + palettes → PNG export →
 shareable URLs → touch/pinch → test suite + CI → cross-backend benchmarks →
 **orbit-relative reference storage** in both perturbation backends (glitch-free
-rebasing near fixed points) → **in-browser WebGPU validation** (`/?validate`) and a
-measured zoom floor.
+rebasing near fixed points) → measured zoom floor → **escape-time validation of the
+WebGPU path** (`/?validate`) → **tiled 16K export** with a streaming PNG encoder →
+keyboard navigation. Details in the [changelog](CHANGELOG.md).
 
 Next: quad-double centre for `1e-50+` zoom · series approximation to skip early
-iterations · progressive/tiled rendering · comparing raw iteration state instead of
-RGB, so the palette stops confounding the validation.
+iterations · progressive on-screen refinement · a CPU build of the CUDA kernel, so
+CI can run the release matrix without a GPU.
 
 ## Stack
 
 TypeScript · Vite · WebGPU (WGSL) · WebGL2 (GLSL) · CUDA C · Python + `uv`
-(NumPy, Pillow, mpmath, Matplotlib) · Vitest · GitHub Actions.
+(NumPy, Pillow, mpmath, Matplotlib) · Vitest · ESLint · Prettier · ruff ·
+GitHub Actions.
 
 ## Cite
 

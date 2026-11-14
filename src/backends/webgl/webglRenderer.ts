@@ -13,9 +13,8 @@
 // pipeline: its output is not in the release validation matrix and its timings
 // are not reported as benchmark evidence.
 
-import type { Renderer, ViewState, RenderInfo } from "../../core/types";
+import type { Renderer, ViewState, RenderInfo, ImageSize, Tile } from "../../core/types";
 import { ddToNumber } from "../../core/doubleDouble";
-import { canvasToPng } from "../../core/image";
 import { MAX_ITER_LIMIT, MAX_DPR } from "../../core/config";
 import vertexShaderSource from "./julia.vert.glsl?raw";
 import fragmentShaderSource from "./julia.frag.glsl?raw";
@@ -35,7 +34,6 @@ function splitNumber(value: number): { high: number; low: number } {
   const high = Math.fround(value);
   return { high, low: value - high };
 }
-
 
 function createShader(gl: WebGL2RenderingContext, type: number, source: string): WebGLShader {
   const shader = gl.createShader(type);
@@ -72,7 +70,11 @@ function createProgram(gl: WebGL2RenderingContext, fragmentSource: string): WebG
   return program;
 }
 
-function getUniform(gl: WebGL2RenderingContext, program: WebGLProgram, name: string): WebGLUniformLocation {
+function getUniform(
+  gl: WebGL2RenderingContext,
+  program: WebGLProgram,
+  name: string,
+): WebGLUniformLocation {
   const location = gl.getUniformLocation(program, name);
   if (location === null) {
     throw new Error(`Uniform not found: ${name}`);
@@ -129,7 +131,8 @@ export class WebGLRenderer implements Renderer {
 
   // Zoom floor, decided by the start-up probe: the double-single limit when the
   // driver keeps the compensated arithmetic, the plain-f32 limit when it does
-  // not. Never 1e-28 — that is the WebGPU perturbation path.
+  // not. Never the perturbation floor (VALIDATED_MIN_SCALE) — that is the
+  // WebGPU path.
   public readonly minScale: number;
 
   // Probe result, surfaced for the benchmark page and the UI message.
@@ -143,8 +146,16 @@ export class WebGLRenderer implements Renderer {
   // Last uploaded palette LUT: we only re-upload on change.
   private lastLut: Uint8Array | null = null;
 
+  // Off-screen target for renderTile (export), created on first use.
+  private tileTarget: {
+    framebuffer: WebGLFramebuffer;
+    texture: WebGLTexture;
+    size: number;
+  } | null = null;
+
   private readonly u: {
     resolution: WebGLUniformLocation;
+    origin: WebGLUniformLocation;
     centerHigh: WebGLUniformLocation;
     centerLow: WebGLUniformLocation;
     scaleDS: WebGLUniformLocation;
@@ -157,9 +168,9 @@ export class WebGLRenderer implements Renderer {
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
 
-    // preserveDrawingBuffer: required so toBlob (save image) can read back the
-    // drawn content afterwards. Negligible cost for a fractal viewer.
-    const gl = canvas.getContext("webgl2", { preserveDrawingBuffer: true });
+    // No preserveDrawingBuffer: the export renders into its own framebuffer
+    // (renderTile), so nothing reads the canvas back after it was presented.
+    const gl = canvas.getContext("webgl2");
     if (!gl) {
       throw new Error("WebGL2 is not supported by this browser");
     }
@@ -182,6 +193,7 @@ export class WebGLRenderer implements Renderer {
 
     this.u = {
       resolution: getUniform(gl, this.program, "u_resolution"),
+      origin: getUniform(gl, this.program, "u_origin"),
       centerHigh: getUniform(gl, this.program, "u_centerHigh"),
       centerLow: getUniform(gl, this.program, "u_centerLow"),
       scaleDS: getUniform(gl, this.program, "u_scaleDS"),
@@ -221,6 +233,83 @@ export class WebGLRenderer implements Renderer {
   public render(view: ViewState): RenderInfo {
     const start = performance.now();
     const gl = this.gl;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+    this.draw(view, this.canvas.width, this.canvas.height, 0, 0);
+    return { cpuMs: performance.now() - start, refLength: 0 };
+  }
+
+  // One tile of a larger image, as tightly packed RGBA rows from the top (see
+  // Renderer.renderTile). Drawn into an off-screen framebuffer: the canvas is
+  // not touched, and readPixels blocks until the GPU is done with the tile.
+  public renderTile(view: ViewState, image: ImageSize, tile: Tile): Promise<Uint8Array> {
+    const gl = this.gl;
+    const target = this.ensureTileTarget(Math.max(tile.width, tile.height));
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, target.framebuffer);
+    gl.viewport(0, 0, tile.width, tile.height);
+    // GL counts rows from the bottom: the tile's lower-left corner in image
+    // coordinates is what the shader adds to gl_FragCoord.
+    this.draw(view, image.width, image.height, tile.x, image.height - tile.y - tile.height);
+
+    const bottomUp = new Uint8Array(tile.width * tile.height * 4);
+    gl.readPixels(0, 0, tile.width, tile.height, gl.RGBA, gl.UNSIGNED_BYTE, bottomUp);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+
+    // Flip to image order (first row = top).
+    const rowBytes = tile.width * 4;
+    const pixels = new Uint8Array(bottomUp.length);
+    for (let y = 0; y < tile.height; y++) {
+      const from = (tile.height - 1 - y) * rowBytes;
+      pixels.set(bottomUp.subarray(from, from + rowBytes), y * rowBytes);
+    }
+    return Promise.resolve(pixels);
+  }
+
+  private ensureTileTarget(size: number): {
+    framebuffer: WebGLFramebuffer;
+    texture: WebGLTexture;
+    size: number;
+  } {
+    const gl = this.gl;
+    if (this.tileTarget !== null && this.tileTarget.size >= size) {
+      return this.tileTarget;
+    }
+    if (this.tileTarget !== null) {
+      gl.deleteFramebuffer(this.tileTarget.framebuffer);
+      gl.deleteTexture(this.tileTarget.texture);
+    }
+    const texture = gl.createTexture();
+    const framebuffer = gl.createFramebuffer();
+    // Unit 1: unit 0 belongs to the palette LUT.
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, size, size, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+    const complete = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.activeTexture(gl.TEXTURE0);
+    if (!complete) {
+      throw new Error("WebGL2: could not create the off-screen export target");
+    }
+    this.tileTarget = { framebuffer, texture, size };
+    return this.tileTarget;
+  }
+
+  // Sets the uniforms and draws into whatever framebuffer is bound.
+  // (originX, originY): bottom-left pixel of the draw inside the image.
+  private draw(
+    view: ViewState,
+    imageWidth: number,
+    imageHeight: number,
+    originX: number,
+    originY: number,
+  ): void {
+    const gl = this.gl;
 
     const cx = splitNumber(ddToNumber(view.centerX));
     const cy = splitNumber(ddToNumber(view.centerY));
@@ -229,7 +318,8 @@ export class WebGLRenderer implements Renderer {
     const cIm = splitNumber(view.cy);
 
     gl.useProgram(this.program);
-    gl.uniform2f(this.u.resolution, this.canvas.width, this.canvas.height);
+    gl.uniform2f(this.u.resolution, imageWidth, imageHeight);
+    gl.uniform2f(this.u.origin, originX, originY);
     gl.uniform2f(this.u.centerHigh, cx.high, cy.high);
     gl.uniform2f(this.u.centerLow, cx.low, cy.low);
     gl.uniform2f(this.u.scaleDS, sc.high, sc.low);
@@ -241,13 +331,21 @@ export class WebGLRenderer implements Renderer {
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.lutTexture);
     if (view.paletteLut !== this.lastLut) {
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, view.paletteLut.length / 4, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, view.paletteLut);
+      gl.texImage2D(
+        gl.TEXTURE_2D,
+        0,
+        gl.RGBA,
+        view.paletteLut.length / 4,
+        1,
+        0,
+        gl.RGBA,
+        gl.UNSIGNED_BYTE,
+        view.paletteLut,
+      );
       this.lastLut = view.paletteLut;
     }
     gl.uniform1i(this.u.lut, 0);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
-
-    return { cpuMs: performance.now() - start, refLength: 0 };
   }
 
   // --- Benchmark harness helpers ---
@@ -300,23 +398,5 @@ export class WebGLRenderer implements Renderer {
       this.canvas.height = height;
     }
     this.gl.viewport(0, 0, this.canvas.width, this.canvas.height);
-  }
-
-  // Full-quality export: grow the backing store, draw, read the PNG, then
-  // restore the display size. Clamped to the GPU's max texture size (keeping
-  // aspect) so it can never fail silently.
-  public async capture(view: ViewState, width: number, height: number): Promise<Blob> {
-    const max = this.gl.getParameter(this.gl.MAX_TEXTURE_SIZE) as number;
-    const scale = Math.min(1, max / Math.max(width, height));
-    const w = Math.max(1, Math.floor(width * scale));
-    const h = Math.max(1, Math.floor(height * scale));
-    this.canvas.width = w;
-    this.canvas.height = h;
-    this.gl.viewport(0, 0, w, h);
-    this.render(view);
-    const blob = await canvasToPng(this.canvas);
-    this.resize();
-    this.render(view); // leave a sharp frame on screen after the export
-    return blob;
   }
 }

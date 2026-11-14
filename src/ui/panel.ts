@@ -4,13 +4,16 @@
 
 import { PALETTES, paletteGradientCss } from "./palettes";
 import { createMandelbrotPicker } from "./mandelbrotPicker";
+import { EXPORT_SIZES, DEFAULT_EXPORT_SIZE } from "../core/config";
 
 export type ControlPanelOptions = {
   initialPalette: number;
   initialC: { x: number; y: number };
   onSelectPalette: (index: number) => void;
   onPickC: (cx: number, cy: number) => void;
+  // Save button: starts an export, or cancels the one in progress.
   onSave: () => void;
+  onCancelSave: () => void;
   onReset: () => void;
   onCopyLink: () => void;
 };
@@ -20,8 +23,13 @@ export type ControlPanel = {
   // Small floating button that shows/hides the panel. The CSS only displays
   // it on small (mobile) screens, where the full panel would cover the view.
   toggleElement: HTMLElement;
-  // Toggles the export button's visual state while the image is generated.
+  // Longest side (px) currently selected for the export.
+  getExportSide(): number;
+  // Switches the save button between "Save image" and "Cancel" while the
+  // image is generated.
   setSaving(saving: boolean): void;
+  // Progress of the export in progress, 0..1, shown on the button.
+  setSaveProgress(fraction: number): void;
   // Brief visual feedback after the link is copied.
   flashCopied(): void;
   // Syncs the display (fields + marker) with a c coming from outside
@@ -62,13 +70,11 @@ export function createControlPanel(opts: ControlPanelOptions): ControlPanel {
     const button = document.createElement("button");
     button.className = "swatch";
     button.title = palette.name;
+    // The swatch is a gradient with no text: name it for screen readers.
+    button.setAttribute("aria-label", `${palette.name} palette`);
     button.style.backgroundImage = paletteGradientCss(palette);
-    if (index === opts.initialPalette) {
-      button.classList.add("active");
-    }
     button.addEventListener("click", () => {
-      swatchButtons.forEach((b) => b.classList.remove("active"));
-      button.classList.add("active");
+      markActiveSwatch(index);
       opts.onSelectPalette(index);
     });
     swatchButtons.push(button);
@@ -77,14 +83,23 @@ export function createControlPanel(opts: ControlPanelOptions): ControlPanel {
   palSection.appendChild(swatches);
   element.appendChild(palSection);
 
+  // Highlights the selected swatch, visually and for assistive technology.
+  function markActiveSwatch(active: number): void {
+    swatchButtons.forEach((b, i) => {
+      b.classList.toggle("active", i === active);
+      b.setAttribute("aria-pressed", String(i === active));
+    });
+  }
+  markActiveSwatch(opts.initialPalette);
+
   // --- c picker section (mini Mandelbrot + manual input) ---
   const cSection = document.createElement("div");
   cSection.className = "panel-section";
   cSection.appendChild(makeLabel("Parameter c — drag on the map or type"));
 
   // c input fields (real + imaginary parts).
-  const reInput = makeNumberInput();
-  const imInput = makeNumberInput();
+  const reInput = makeNumberInput("Real part of c");
+  const imInput = makeNumberInput("Imaginary part of c");
 
   // The map updates the fields while dragging.
   const picker = createMandelbrotPicker((cx, cy) => {
@@ -121,12 +136,36 @@ export function createControlPanel(opts: ControlPanelOptions): ControlPanel {
   const actions = document.createElement("div");
   actions.className = "panel-actions";
 
+  // Save button + export size, side by side.
+  const saveRow = document.createElement("div");
+  saveRow.className = "save-row";
+
   const saveLabel = "Save image <kbd>S</kbd>";
+  let saving = false;
   const saveButton = document.createElement("button");
   saveButton.className = "action-button primary";
   saveButton.innerHTML = saveLabel;
-  saveButton.addEventListener("click", () => opts.onSave());
-  actions.appendChild(saveButton);
+  saveButton.addEventListener("click", () => {
+    if (saving) {
+      opts.onCancelSave();
+    } else {
+      opts.onSave();
+    }
+  });
+
+  const sizeSelect = document.createElement("select");
+  sizeSelect.className = "size-select";
+  sizeSelect.setAttribute("aria-label", "Export size (longest side)");
+  EXPORT_SIZES.forEach((size, index) => {
+    const option = document.createElement("option");
+    option.value = String(size.side);
+    option.textContent = size.label;
+    option.selected = index === DEFAULT_EXPORT_SIZE;
+    sizeSelect.appendChild(option);
+  });
+
+  saveRow.append(saveButton, sizeSelect);
+  actions.appendChild(saveRow);
 
   const copyLabel = "Copy link";
   const copyButton = document.createElement("button");
@@ -155,15 +194,20 @@ export function createControlPanel(opts: ControlPanelOptions): ControlPanel {
     element,
     toggleElement: toggle,
     setC,
-    setPalette(index: number): void {
-      swatchButtons.forEach((b, i) => b.classList.toggle("active", i === index));
-    },
-    setSaving(saving: boolean): void {
-      saveButton.disabled = saving;
-      if (saving) {
-        saveButton.textContent = "Rendering…";
+    setPalette: markActiveSwatch,
+    getExportSide: () => Number(sizeSelect.value),
+    setSaving(next: boolean): void {
+      saving = next;
+      sizeSelect.disabled = next;
+      if (next) {
+        saveButton.textContent = "Rendering… (cancel)";
       } else {
         saveButton.innerHTML = saveLabel;
+      }
+    },
+    setSaveProgress(fraction: number): void {
+      if (saving) {
+        saveButton.textContent = `Rendering ${Math.round(fraction * 100)}% (cancel)`;
       }
     },
     flashCopied(): void {
@@ -186,9 +230,10 @@ function makeLabel(text: string): HTMLElement {
   return label;
 }
 
-function makeNumberInput(): HTMLInputElement {
+function makeNumberInput(label: string): HTMLInputElement {
   const input = document.createElement("input");
   input.type = "number";
+  input.setAttribute("aria-label", label);
   input.step = "0.001";
   input.className = "c-input";
   return input;

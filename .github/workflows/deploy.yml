@@ -27,6 +27,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      # Never publish a build whose tests fail.
+      - run: npm test
       # Base path is passed here only, so local dev/preview keep serving at /.
       - run: npx tsc && npx vite build --base=/FractalFlow/
       # enablement: true auto-creates the Pages site on first run, so the

@@ -1,0 +1,67 @@
+# Changelog
+
+Notable changes to FractalFlow. The format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
+[Semantic Versioning](https://semver.org/).
+
+## Unreleased
+
+### Added
+
+- **Tiled export up to 16K.** The PNG export renders 512-pixel tiles and feeds
+  them to a streaming PNG encoder (`src/export/`), so no single draw call is
+  long enough to trip a GPU watchdog and the picture is never held whole in
+  memory. The size is no longer bounded by the GPU's largest texture: 16K
+  (15360×8640) is twice the 8192 limit of a default WebGPU device. A tiled
+  export is pixel-identical to a single-draw one on both backends. The panel
+  offers 4K / 8K / 16K, shows progress, and the export can be cancelled
+  (button or `Esc`).
+- **WebGPU validation on raw escape times.** The shader has a second output
+  (`fsRaw`) that writes the smooth iteration count to a float target, the
+  mpmath references archive theirs (`*_reference.f32`), and `/?validate`
+  compares the two with a PASS/FAIL verdict per case. Colours are still
+  reported, as a secondary figure.
+- `scripts/validate_release.py --reference-raw`: regenerates the references'
+  raw escape times with mpmath alone (no CUDA binary), checking each against
+  its archived PNG.
+- Keyboard navigation: arrows pan, `+` / `-` zoom.
+- A visible message when the GPU device is lost or no backend can start,
+  instead of a frozen or black page.
+- `paper/generate_figures.py --check`: verifies the archived report data
+  against its manifest without regenerating anything. Run in CI.
+- ESLint (type-aware), Prettier and ruff, enforced in CI; `npm run check` runs
+  everything locally.
+
+### Changed
+
+- The WGSL iteration reads the reference orbit once per iteration instead of
+  twice (the value fetched for the rebasing test is carried to the next
+  iteration). Output is bit-identical; frame time dropped by about 10% at the
+  deep end of the benchmark schedule on an Apple M5 Pro. The RTX 3060 Ti
+  figures in the README and the report are from 1.2.0 and were not re-measured.
+- The palette lookup table is sampled at texel centres. It used to be half a
+  texel off the analytic gradient of the CUDA and Python renderers (about one
+  8-bit level on average).
+- The interaction resolution follows the display's refresh interval. On a
+  60 Hz display it could previously be lowered but never raised again.
+- `main.ts` is split into modules: render loop (`core/frameLoop.ts`), URL state
+  (`core/urlState.ts`), export (`export/`), toast and error UI.
+- Text files are stored and checked out with LF (`.gitattributes`), and the
+  report manifest hashes them that way: it now matches on every clone, not
+  only on the Windows machine that produced it.
+- `validate_release.py --case` writes `validation_results_partial.csv` instead
+  of truncating the frozen matrix.
+
+### Fixed
+
+- The WebGL2 fallback could not start after a WebGPU failure that happened
+  once the canvas had been bound to WebGPU.
+- A shared link without `c` or palette loaded `c = 0` and the first palette
+  instead of keeping the current ones.
+- The CUDA renderer reported success when it could not write its PNG or CSV.
+
+## 1.2.0 — 2026-07-30
+
+Escape-time validation of the CUDA backend, the orbit-encoding figure, the 4K
+plate, and the technical report at its current evidence. See the
+[report](paper/main.pdf).

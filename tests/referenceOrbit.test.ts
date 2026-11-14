@@ -6,7 +6,7 @@
 // (D_n = Z_n − Z_0); with a centre of 0 they coincide with the absolute orbit.
 
 import { describe, it, expect } from "vitest";
-import { computeReferenceOrbit } from "../src/core/referenceOrbit";
+import { computeReferenceOrbit, OrbitBuffer } from "../src/core/referenceOrbit";
 import { ddFromNumber } from "../src/core/doubleDouble";
 
 const C = { x: -0.8, y: 0.156 }; // default Julia parameter (bounded orbit at 0)
@@ -14,13 +14,7 @@ const C = { x: -0.8, y: 0.156 }; // default Julia parameter (bounded orbit at 0)
 describe("agreement with direct float64 iteration", () => {
   it("matches a float64 orbit within float32 rounding", () => {
     const maxIter = 200;
-    const orbit = computeReferenceOrbit(
-      ddFromNumber(0),
-      ddFromNumber(0),
-      C.x,
-      C.y,
-      maxIter,
-    );
+    const orbit = computeReferenceOrbit(ddFromNumber(0), ddFromNumber(0), C.x, C.y, maxIter);
 
     let zx = 0;
     let zy = 0;
@@ -70,7 +64,7 @@ describe("orbit length invariants", () => {
     // still below ~1e-6. Absolute f32 storage would put ~1.5 in data[2]:
     // this is the regression guard for the blocky deep-zoom glitches.
     const fx = 1.5275031186435346;
-    const fy = -0.07591217835228787;
+    const fy = -0.07591217835228788;
     const orbit = computeReferenceOrbit(ddFromNumber(fx), ddFromNumber(fy), C.x, C.y, 20);
     expect(orbit.length).toBe(20);
     expect(orbit.data[0]).toBe(0); // D_0 = Z_0 − Z_0 exactly
@@ -87,5 +81,32 @@ describe("orbit length invariants", () => {
       expect(orbit.data.length).toBe(maxIter * 2);
       expect(orbit.length).toBeLessThanOrEqual(maxIter);
     }
+  });
+});
+
+describe("OrbitBuffer (reused storage)", () => {
+  it("matches a freshly allocated orbit, compute after compute", () => {
+    const buffer = new OrbitBuffer(500);
+    const views: [number, number, number][] = [
+      [0, 0, 400], // long orbit first...
+      [2, 2, 100], // ...then one that escapes at once, leaving stale data behind it
+      [0.3, -0.2, 500],
+    ];
+    for (const [x, y, maxIter] of views) {
+      const fresh = computeReferenceOrbit(ddFromNumber(x), ddFromNumber(y), C.x, C.y, maxIter);
+      buffer.compute(ddFromNumber(x), ddFromNumber(y), C.x, C.y, maxIter);
+      expect(buffer.length).toBe(fresh.length);
+      // Only the first `length` points are meaningful (and uploaded).
+      expect(buffer.data.subarray(0, buffer.length * 2)).toEqual(
+        fresh.data.subarray(0, fresh.length * 2),
+      );
+    }
+  });
+
+  it("refuses an iteration count beyond its capacity", () => {
+    const buffer = new OrbitBuffer(100);
+    expect(() => buffer.compute(ddFromNumber(0), ddFromNumber(0), C.x, C.y, 101)).toThrow(
+      RangeError,
+    );
   });
 });

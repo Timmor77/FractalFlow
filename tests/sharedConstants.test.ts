@@ -15,6 +15,7 @@ import wgsl from "../src/backends/webgpu/julia.wgsl?raw";
 import glsl from "../src/backends/webgl/julia.frag.glsl?raw";
 import cuda from "../cuda/julia.cu?raw";
 import python from "../scripts/reference_julia.py?raw";
+import validateHarness from "../src/bench/validate.ts?raw";
 
 const SOURCES = { wgsl, glsl, cuda, python };
 
@@ -53,6 +54,22 @@ describe("shared rendering constants", () => {
       const [r, g, b] = stop.color;
       expect(SOURCES.python).toContain(`(${r}, ${g}, ${b})`);
     }
+  });
+
+  it("marks interior pixels with the same sentinel in every raw output", () => {
+    // The raw escape-time grids are compared across implementations: a pixel
+    // that never escapes must carry the same value in all of them.
+    expect(SOURCES.wgsl).toContain("select(-1.0, pixel.smoothIter, pixel.escaped)");
+    expect(SOURCES.cuda).toContain("#define INTERIOR_SENTINEL (-1.0f)");
+    expect(SOURCES.python).toContain("INTERIOR = -1.0");
+    expect(validateHarness).toContain("const INTERIOR = -1;");
+  });
+
+  it("derives colour and raw output from one shared iteration in WGSL", () => {
+    // If fs and fsRaw each had their own loop, validating one would say
+    // nothing about the other.
+    expect(SOURCES.wgsl.match(/\bloop \{/g)?.length).toBe(1);
+    expect(SOURCES.wgsl.match(/iterate\(fragCoord\.xy\)/g)?.length).toBe(2);
   });
 
   it("tests escape before advancing, in every backend", () => {

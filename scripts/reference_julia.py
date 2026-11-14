@@ -27,7 +27,6 @@ import os
 import numpy as np
 from PIL import Image
 
-
 # "Ice fractal" gradient, same stops as the browser default palette
 # (src/ui/palettes.ts) and the CUDA `palette` (cuda/julia.cu).
 ICE_POS = [0.0, 0.16, 0.42, 0.6425, 0.8575, 1.0]
@@ -125,7 +124,8 @@ def run_cpu_bench(out_path: str) -> None:
     print(f"CPU baseline (numpy float64): {seconds * 1e3:.0f} ms, {giter:.3f} GIter/s, {mpix:.2f} Mpix/s")
 
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
-    with open(out_path, "w") as f:
+    # newline="\n": the same bytes on Windows as elsewhere (see .gitattributes).
+    with open(out_path, "w", newline="\n") as f:
         f.write("# backend: numpy-f64 (vectorized direct iteration, colouring excluded)\n")
         f.write("scale,maxIter,ms,GIterPerSec,MpixPerSec\n")
         f.write(f"{scale:.6e},{max_iter},{seconds * 1e3:.3f},{giter:.3f},{mpix:.1f}\n")
@@ -147,7 +147,8 @@ def run_escape_stats(out_path: str) -> None:
     points = [(0, 3.0, 300), (6, 3e-6, 4000), (12, 3e-12, 4000)]
 
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
-    with open(out_path, "w") as f:
+    # newline="\n": the same bytes on Windows as elsewhere (see .gitattributes).
+    with open(out_path, "w", newline="\n") as f:
         f.write("# direct float64 escape times for the benchmark view, 1920x1080\n")
         f.write("k,scale,maxIter,meanIter,meanIterFrac,group16x2Frac,group8x4Frac\n")
         for k, scale, max_iter in points:
@@ -275,10 +276,14 @@ def main() -> None:
 
     use_numpy = args.fast and not args.hp
     if use_numpy:
-        img = render_numpy(float(args.re), float(args.im), args.scale, args.cre, args.cim, args.iter, args.w, args.h)
+        img = render_numpy(
+            float(args.re), float(args.im), args.scale, args.cre, args.cim, args.iter, args.w, args.h
+        )
         method = "numpy float64"
     else:
-        img = render_mpmath(args.re, args.im, args.scale, args.cre, args.cim, args.iter, args.w, args.h, args.dps)
+        img = render_mpmath(
+            args.re, args.im, args.scale, args.cre, args.cim, args.iter, args.w, args.h, args.dps
+        )
         method = f"mpmath dps={args.dps}"
 
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)

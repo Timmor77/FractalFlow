@@ -1,0 +1,12 @@
+# Text is stored and checked out with LF on every platform. The report's
+# manifest (paper/generated/manifest.json) hashes CSV and LaTeX files: a CRLF
+# checkout would give them different bytes, and different hashes, from the
+# ones in the repository.
+* text=auto eol=lf
+
+# Binary assets: never touch their bytes.
+*.png binary
+*.jpg binary
+*.gif binary
+*.pdf binary
+*.f32 binary

@@ -14,7 +14,9 @@
 // count means the same thing in all four.
 precision highp float;
 
-uniform vec2 u_resolution;
+uniform vec2 u_resolution; // size of the WHOLE image in pixels
+uniform vec2 u_origin;     // bottom-left pixel of this draw inside the image;
+                           // (0, 0) on screen, the tile offset in a tiled export
 uniform vec2 u_centerHigh; // (centerX.hi, centerY.hi)
 uniform vec2 u_centerLow;  // (centerX.lo, centerY.lo)
 uniform vec2 u_scaleDS;    // (scale.hi, scale.lo)
@@ -67,7 +69,9 @@ vec2 dsMulFloat(vec2 a, float b) {
 float dsToFloat(vec2 a) { return a.x + a.y; }
 
 void main() {
-  vec2 uv = gl_FragCoord.xy / u_resolution;
+  // Both terms are (integer + 0.5)-or-integer values far below 2^24, so the
+  // sum is exact: a tile gets the coordinates of a single full-size draw.
+  vec2 uv = (gl_FragCoord.xy + u_origin) / u_resolution;
   vec2 p = uv - 0.5;
   p.x *= u_resolution.x / u_resolution.y;
 

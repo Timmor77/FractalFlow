@@ -45,7 +45,6 @@ body {
   touch-action: none;
 }
 
-
 /* Stats overlay displayed above the canvas. */
 #stats-overlay {
   /* Fixed position relative to the window. */
@@ -127,7 +126,11 @@ body {
   padding: 14px;
 
   color: #e8ecf4;
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-family:
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    sans-serif;
   font-size: 13px;
 
   background: rgba(15, 18, 28, 0.72);
@@ -167,7 +170,9 @@ body {
   border-radius: 6px;
   cursor: pointer;
   background-size: cover;
-  transition: transform 0.12s ease, border-color 0.12s ease;
+  transition:
+    transform 0.12s ease,
+    border-color 0.12s ease;
 }
 
 .swatch:hover {
@@ -203,7 +208,9 @@ body {
   border: 2px solid #ffffff;
   border-radius: 50%;
   transform: translate(-50%, -50%);
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6), 0 0 6px rgba(0, 0, 0, 0.7);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.6),
+    0 0 6px rgba(0, 0, 0, 0.7);
   pointer-events: none;
 }
 
@@ -264,7 +271,10 @@ body {
   font-family: inherit;
   font-size: 13px;
   cursor: pointer;
-  transition: background 0.12s ease, transform 0.12s ease, opacity 0.12s ease;
+  transition:
+    background 0.12s ease,
+    transform 0.12s ease,
+    opacity 0.12s ease;
 }
 
 .action-button:hover {
@@ -312,8 +322,8 @@ body {
   font-weight: 600;
 }
 
-/* Transient "maximum depth reached" message (top centre). */
-.zoom-toast {
+/* Transient message (top centre): zoom limit, export failure. See ui/toast.ts. */
+.toast {
   position: fixed;
   top: 24px;
   left: 50%;
@@ -322,7 +332,11 @@ body {
 
   padding: 8px 16px;
   color: #ffd9a0;
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-family:
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    sans-serif;
   font-size: 13px;
 
   background: rgba(20, 24, 36, 0.85);
@@ -332,10 +346,12 @@ body {
 
   pointer-events: none;
   opacity: 0;
-  transition: opacity 0.25s ease, transform 0.25s ease;
+  transition:
+    opacity 0.25s ease,
+    transform 0.25s ease;
 }
 
-.zoom-toast.visible {
+.toast.visible {
   opacity: 1;
   transform: translateX(-50%) translateY(0);
 }
@@ -396,4 +412,134 @@ body {
     top: calc(8px + env(safe-area-inset-top, 0px));
     left: calc(8px + env(safe-area-inset-left, 0px));
   }
+}
+
+/* Blocking message: no usable backend, or the GPU was lost (see ui/fatal.ts). */
+.fatal-message {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  z-index: 30;
+  transform: translate(-50%, -50%);
+
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: min(420px, calc(100vw - 48px));
+  padding: 20px;
+  box-sizing: border-box;
+
+  color: #e8ecf4;
+  font-family:
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+
+  background: rgba(15, 18, 28, 0.94);
+  border: 1px solid rgba(255, 200, 120, 0.4);
+  border-radius: 14px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.6);
+}
+
+.fatal-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #ffd9a0;
+}
+
+/* Visible keyboard focus on every control (the mouse never shows it). */
+.swatch:focus-visible,
+.action-button:focus-visible,
+.panel-toggle:focus-visible,
+.c-input:focus-visible {
+  outline: 2px solid #8fb3ff;
+  outline-offset: 2px;
+}
+
+/* Users who asked their system for less motion: no fades, no sliding toast. */
+@media (prefers-reduced-motion: reduce) {
+  #fractal-canvas,
+  #stats-overlay,
+  .control-panel,
+  .panel-toggle {
+    animation: none;
+  }
+
+  .swatch,
+  .action-button,
+  .toast {
+    transition: none;
+  }
+}
+
+/* Save button with the export size next to it. */
+.save-row {
+  display: flex;
+  gap: 8px;
+}
+
+.save-row .action-button {
+  flex: 1;
+}
+
+.size-select {
+  padding: 0 8px;
+  color: #e8ecf4;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 9px;
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.size-select:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.size-select:focus-visible {
+  outline: 2px solid #8fb3ff;
+  outline-offset: 2px;
+}
+
+/* Native dropdown list: dark, like the panel. */
+.size-select option {
+  color: #e8ecf4;
+  background: #151a26;
+}
+
+/* Measurement pages (/?bench, /?validate): a plain, scrollable log. */
+.report-page {
+  min-height: 100vh;
+  padding: 24px;
+  box-sizing: border-box;
+  overflow: auto;
+  color: #e8ecf4;
+  background: #0b0e16;
+  font-family: Consolas, Monaco, monospace;
+  font-size: 13px;
+}
+
+.report-page h1 {
+  margin: 0 0 4px;
+  font-size: 18px;
+}
+
+.report-subtitle {
+  margin-bottom: 16px;
+  color: #9aa4b8;
+}
+
+.report-page pre {
+  margin: 0;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.report-page .action-button {
+  margin: 12px 8px 0 0;
 }

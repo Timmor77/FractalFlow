@@ -79,15 +79,20 @@ export class Viewport {
     return Math.max(0, Math.log2(this.initialScale / this.scale));
   }
 
-  // True when the maximum depth is reached (DD centre precision).
-  // Beyond that, zooming changes nothing: no point re-rendering.
+  // True when the zoom floor is reached (the backend's validated depth, see
+  // minScale). Beyond that, zooming changes nothing: no point re-rendering.
   public isAtMaxDepth(): boolean {
     return this.scale <= this.minScale;
   }
 
   // Updates the zoom TARGET around the cursor from a wheel notch.
   // deltaY < 0 => zoom in (factor < 1), deltaY > 0 => zoom out.
-  public nudgeZoom(mouseX: number, mouseY: number, rect: DOMRect, deltaY: number): "zoom" | "blocked" {
+  public nudgeZoom(
+    mouseX: number,
+    mouseY: number,
+    rect: DOMRect,
+    deltaY: number,
+  ): "zoom" | "blocked" {
     const clampedDeltaY = Math.max(-120, Math.min(120, deltaY));
     const factor = Math.exp(clampedDeltaY * this.wheelZoomStrength);
     return this.nudgeZoomByFactor(mouseX, mouseY, rect, factor);
@@ -98,7 +103,12 @@ export class Viewport {
   // midpoint), kept fixed. Returns "blocked" if we are already at a bound and
   // pushing further in the same direction (nothing to animate, the image would
   // be identical).
-  public nudgeZoomByFactor(mouseX: number, mouseY: number, rect: DOMRect, factor: number): "zoom" | "blocked" {
+  public nudgeZoomByFactor(
+    mouseX: number,
+    mouseY: number,
+    rect: DOMRect,
+    factor: number,
+  ): "zoom" | "blocked" {
     // Anchor point position, centred on 0 and corrected for the aspect ratio.
     const localX = mouseX - rect.left;
     const localY = mouseY - rect.top;
