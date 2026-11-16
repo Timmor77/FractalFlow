@@ -7,13 +7,15 @@ path is defined here, once, and can be drawn by either GPU backend:
 - CUDA (default): each frame is rendered by the native renderer (build it
   first: see cuda/README.md).
 - Any other renderer: --frames-dir assembles frames rendered elsewhere (one
-  image per frame, sorted by name, at --ss times the target size) along the
-  path printed by --print-path. The committed animation was made this way with the
-  WebGPU backend, through its off-screen tile path (Renderer.renderTile).
+  image per frame, sorted by name) along the path printed by --print-path. The
+  committed animation was made this way with the WebGPU backend, through its
+  off-screen tile path (Renderer.renderTile), each frame drawn at 4800×2700 and
+  box-averaged 3×3 in linear light, exactly as downsample() does here.
 
-Frames are downscaled with Lanczos (the supersampling turns shimmering
-sub-pixel filaments into smooth antialiased detail), stamped with the current
-magnification, then written as a lossy animated WebP (the default: GitHub and
+Frames are rendered at --ss times the output size and averaged down in linear
+light (the supersampling turns shimmering sub-pixel filaments into smooth
+antialiased detail; averaging in sRGB would darken them), stamped with the
+current magnification, then written as a lossy animated WebP (the default: GitHub and
 every current browser play it, at a fraction of a GIF's size on this detail) or
 as a GIF quantized to ONE palette built from frames spread over the whole zoom,
 so colours neither flicker nor drift as the palette cycles.
@@ -22,8 +24,10 @@ The zoom is log-linear with eased ends. The centre glides from the origin to the
 target while the whole set is in view, so the first frame is the full set,
 centred, rather than the set pushed to one side.
 
-The README shows the animation at its native width: keep --width in sync with the
-`<img width=...>` attribute there, otherwise browser upscaling blurs it.
+The README shows the animation at HALF its pixel width (1600 px file, width="800"),
+so a high-density screen gets one image pixel per device pixel and an ordinary
+one gets a clean 2:1 reduction. The size (~50 MB) is the price of that sharpness:
+fine colour detail is what lossy coders damage first.
 
 Usage:
     uv run python scripts/make_zoom_gif.py
@@ -41,12 +45,39 @@ import subprocess
 import sys
 import tempfile
 
+import numpy as np
 from mpmath import mp, mpf, nstr
 from PIL import Image, ImageDraw, ImageFont
 
 mp.dps = 50
 
 SUPERSCRIPT = str.maketrans("0123456789-", "⁰¹²³⁴⁵⁶⁷⁸⁹⁻")
+
+
+def _to_linear(srgb: np.ndarray) -> np.ndarray:
+    c = srgb / 255.0
+    return np.where(c <= 0.04045, c / 12.92, ((c + 0.055) / 1.055) ** 2.4)
+
+
+def _to_srgb(linear: np.ndarray) -> np.ndarray:
+    c = np.clip(linear, 0.0, 1.0)
+    return np.where(c <= 0.0031308, 12.92 * c, 1.055 * c ** (1 / 2.4) - 0.055) * 255.0
+
+
+def downsample(image: Image.Image, width: int, height: int) -> Image.Image:
+    """Reduces a supersampled frame in linear light: a plain box average when
+    the size is an exact multiple (the usual case), Lanczos otherwise."""
+    if image.size == (width, height):
+        return image
+    lin = _to_linear(np.asarray(image.convert("RGB"), dtype=np.float64))
+    fx, fy = image.width / width, image.height / height
+    if fx == fy and fx.is_integer():
+        f = int(fx)
+        out = lin.reshape(height, f, width, f, 3).mean(axis=(1, 3))
+    else:
+        channels = [Image.fromarray(lin[..., c].astype(np.float32), "F") for c in range(3)]
+        out = np.stack([np.asarray(c.resize((width, height), Image.LANCZOS)) for c in channels], axis=-1)
+    return Image.fromarray(np.round(_to_srgb(out)).astype(np.uint8), "RGB")
 
 
 def camera_path(args: argparse.Namespace) -> list[tuple[float, str, str, int]]:
@@ -175,12 +206,12 @@ def main() -> None:
     p.add_argument("--frames", type=int, default=220)
     p.add_argument("--hold-start", type=int, default=12, help="extra copies of the first frame")
     p.add_argument("--hold-end", type=int, default=30, help="extra copies of the last frame")
-    p.add_argument("--width", type=int, default=800)
-    p.add_argument("--height", type=int, default=450)
+    p.add_argument("--width", type=int, default=1600)
+    p.add_argument("--height", type=int, default=900)
     p.add_argument("--colors", type=int, default=256, help="GIF only")
-    p.add_argument("--quality", type=int, default=60, help="WebP only, 0-100")
+    p.add_argument("--quality", type=int, default=90, help="WebP only, 0-100")
     p.add_argument("--duration", type=int, default=40, help="ms per frame")
-    p.add_argument("--ss", type=int, default=2, help="supersampling factor")
+    p.add_argument("--ss", type=int, default=3, help="supersampling factor (CUDA path)")
     p.add_argument(
         "--dither",
         choices=["none", "fs"],
@@ -213,7 +244,7 @@ def main() -> None:
 
     frames = []
     for image, (scale, *_rest) in zip(raw, path, strict=True):
-        frame = image.resize((args.width, args.height), Image.LANCZOS)
+        frame = downsample(image, args.width, args.height)
         stamp(frame, scale, args.start_scale)
         frames.append(frame)
 
@@ -255,9 +286,9 @@ def main() -> None:
     size_mb = os.path.getsize(args.out) / 1e6
     seconds = len(sequence) * args.duration / 1000
     print(f"-> {args.out} ({size_mb:.2f} MB, {len(sequence)} frames, {seconds:.1f} s)")
-    # GitHub's image proxy (camo) refuses files around 10 MB; stay well under.
-    if size_mb > 8.5:
-        print("Over the 8.5 MB budget: retry with fewer frames, a smaller size or a lower quality.")
+    # GitHub refuses files over 100 MB in a push (and warns from 50 MB).
+    if size_mb > 95:
+        print("Over the 95 MB budget: retry with fewer frames or a lower quality.")
 
 
 if __name__ == "__main__":

@@ -18,9 +18,9 @@ get a direct **GLSL** renderer, which only goes as deep as its arithmetic allows
 Chrome and Edge, WebGL2 elsewhere).
 
 <p align="center">
-  <!-- Native width (matches make_zoom_gif.py --width): browser upscaling would blur it.
-       Frames rendered by the WebGPU backend along the script's camera path at 1600×900,
-       then assembled with make_zoom_gif.py --frames-dir. -->
+  <!-- Shown at half its 1600 px width, so it stays sharp on high-density screens.
+       Frames rendered by the WebGPU backend along the script's camera path at 4800×2700,
+       averaged 3×3 in linear light, then assembled with make_zoom_gif.py --frames-dir. -->
   <img src="docs/zoom.webp" width="800"
        alt="Continuous zoom from the whole Julia set to a magnification of 10¹⁵, rendered by the WebGPU backend">
 </p>
@@ -56,7 +56,7 @@ counter shows the magnification; direct `float64` iteration gives out near ×10�
   that lints, type-checks, tests and re-verifies the archived evidence.
 
 <p align="center">
-  <img src="docs/app.jpg" width="760"
+  <img src="docs/app.png" width="820"
        alt="The app at ×150 000 zoom: stats overlay, palettes, Mandelbrot c-picker, export size">
 </p>
 
@@ -67,9 +67,9 @@ the Julia parameter `c`, PNG export, shareable link.*
 ## Gallery
 
 <p align="center">
-  <!-- Light preview (the full plate is 5.7 MB); the link opens the original. -->
+  <!-- 1640 px preview of the 3840 px plate, shown at half size; the link opens the original. -->
   <a href="docs/renders/hero-4k.png">
-    <img src="docs/renders/hero-preview.jpg" width="820"
+    <img src="docs/renders/hero-preview.png" width="820"
          alt="Julia set at c = 0.285 + 0.01i, magnified 3e11 times around a repelling fixed point">
   </a>
 </p>
@@ -80,15 +80,36 @@ with 2 600 iterations and downsampled to 4K; [click for the full-resolution
 file](docs/renders/hero-4k.png). Direct `float64` iteration cannot separate
 neighbouring pixels at this depth.*
 
-Each image below opens the live demo on that exact view: the centre, zoom, `c` and
+Four values of `c`, each framed on the repelling fixed point around which its set
+winds. Each image opens the live demo on that exact view: the centre, zoom, `c` and
 palette travel in the URL, which is how the app shares a view.
 
-| | |
-|:---:|:---:|
-| [![c = -0.8 + 0.156i](docs/gallery/classic.jpg)](https://timmor77.github.io/FractalFlow/#x=0_0&y=0_0&s=3&cx=-0.8&cy=0.156&p=0) | [![c = 0.285 + 0.01i](docs/gallery/spirals.jpg)](https://timmor77.github.io/FractalFlow/#x=0_0&y=0_0&s=3&cx=0.285&cy=0.01&p=0) |
-| `c = -0.8 + 0.156i` | `c = 0.285 + 0.01i` |
-| [![c = -0.7269 + 0.1889i](docs/gallery/dendrites.jpg)](https://timmor77.github.io/FractalFlow/#x=0_0&y=0_0&s=3&cx=-0.7269&cy=0.1889&p=2) | [![c = -0.4 + 0.6i](docs/gallery/seahorse.jpg)](https://timmor77.github.io/FractalFlow/#x=0_0&y=0_0&s=3&cx=-0.4&cy=0.6&p=4) |
-| `c = -0.7269 + 0.1889i` | `c = -0.4 + 0.6i` |
+<table>
+  <tr>
+    <td align="center">
+      <a href="https://timmor77.github.io/FractalFlow/#x=-0.5275031186435346_-3.232802264249084e-18&y=0.07591217835228786_4.701141084336033e-18&s=0.6&cx=-0.8&cy=0.156&p=0"><img src="docs/gallery/classic.png" width="380"
+         alt="Julia set for c = -0.8 + 0.156i, around the fixed point where it spirals"></a><br>
+      <code>c = -0.8 + 0.156i</code>
+    </td>
+    <td align="center">
+      <a href="https://timmor77.github.io/FractalFlow/#x=0.4735372956181479_-1.63420744652396e-17&y=0.18894516327019673_-5.414053782055223e-18&s=0.25&cx=0.285&cy=0.01&p=0"><img src="docs/gallery/spirals.png" width="380"
+         alt="Julia set for c = 0.285 + 0.01i, around the fixed point where it spirals"></a><br>
+      <code>c = 0.285 + 0.01i</code>
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <a href="https://timmor77.github.io/FractalFlow/#x=-0.4929491148691219_-1.6587234810528338e-17&y=0.09512068502367235_-3.955202270985088e-18&s=0.6&cx=-0.7269&cy=0.1889&p=2"><img src="docs/gallery/dendrites.png" width="380"
+         alt="Julia set for c = -0.7269 + 0.1889i, around the fixed point where it spirals"></a><br>
+      <code>c = -0.7269 + 0.1889i</code>
+    </td>
+    <td align="center">
+      <a href="https://timmor77.github.io/FractalFlow/#x=-0.37595385170901174_1.2867535475977852e-17&y=0.34248379570988946_2.2448871183964795e-17&s=0.6&cx=-0.4&cy=0.6&p=4"><img src="docs/gallery/seahorse.png" width="380"
+         alt="Julia set for c = -0.4 + 0.6i, around the fixed point where it spirals"></a><br>
+      <code>c = -0.4 + 0.6i</code>
+    </td>
+  </tr>
+</table>
 
 ## Why perturbation theory?
 
@@ -134,7 +155,7 @@ is `1e-20`: not the representation's limit, but the deepest scale where the froz
 validation still holds (see [Correctness](#correctness)).
 
 <p align="center">
-  <img src="docs/deep-zoom.jpg" width="820"
+  <img src="docs/deep-zoom.png" width="820"
        alt="Spiral of the Julia set rendered in the browser at a view height of 3e-14, centred on a repelling fixed point of z²+c">
 </p>
 

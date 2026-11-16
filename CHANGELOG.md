@@ -35,14 +35,17 @@ Notable changes to FractalFlow. The format follows
 ### Changed
 
 - README visuals. The hero animation (`docs/zoom.webp`, replacing
-  `docs/zoom.gif`) now goes from the whole set to ×10¹⁵ at 800×450, past the
-  `float64` limit, with a magnification counter. Its target is a typical point of
-  the Julia set instead of the β fixed point, which kept half the frame empty.
-  It was rendered by the WebGPU backend and assembled by
-  `scripts/make_zoom_gif.py`, which gains the new camera path, `--frames-dir`,
-  `--print-path` and lossy WebP output. The gallery is re-rendered at 1280×720,
-  and the deep-zoom figure is now the spiral around the α fixed point at
-  `3e-14`.
+  `docs/zoom.gif`) now goes from the whole set to ×10¹⁵, past the `float64`
+  limit, with a magnification counter. Its target is a typical point of the
+  Julia set instead of the β fixed point, which kept half the frame empty. It
+  was rendered by the WebGPU backend at 4800×2700 per frame, averaged 3×3 in
+  linear light to 1600×900 and shown at half size, so it stays sharp on
+  high-density screens. `scripts/make_zoom_gif.py` gains the new camera path,
+  linear-light downsampling, `--frames-dir`, `--print-path` and WebP output.
+  The stills are now lossless PNG at two to three times their displayed size (the JPEGs'
+  chroma subsampling smeared the fine colour detail): the gallery is reframed
+  on each set's spiralling fixed point, the deep-zoom figure is the spiral
+  around the α fixed point at `3e-14`, and the app screenshot is retaken at 2×.
 - The WGSL iteration reads the reference orbit once per iteration instead of
   twice (the value fetched for the rebasing test is carried to the next
   iteration). Output is bit-identical; frame time dropped by about 10% at the
