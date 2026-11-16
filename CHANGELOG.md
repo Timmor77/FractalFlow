@@ -34,14 +34,17 @@ Notable changes to FractalFlow. The format follows
 
 ### Changed
 
-- README visuals. The hero animation (`docs/zoom.webp`, replacing
+- README visuals. The hero animation (`docs/zoom.avif`, replacing
   `docs/zoom.gif`) now goes from the whole set to ×10¹⁵, past the `float64`
   limit, with a magnification counter. Its target is a typical point of the
   Julia set instead of the β fixed point, which kept half the frame empty. It
   was rendered by the WebGPU backend at 4800×2700 per frame, averaged 3×3 in
   linear light to 1600×900 and shown at half size, so it stays sharp on
-  high-density screens. `scripts/make_zoom_gif.py` gains the new camera path,
-  linear-light downsampling, `--frames-dir`, `--print-path` and WebP output.
+  high-density screens. It is an AVIF with every frame a keyframe: Safari
+  played the same animation as a WebP at about 1.4 frames per second, and as an
+  inter-coded AVIF at about 3; this one plays at 25 in Safari and Chrome. `scripts/make_zoom_gif.py` gains the new camera path, linear-light
+  downsampling, `--frames-dir`, `--print-path` and AVIF (via ffmpeg and
+  SVT-AV1) and WebP output.
   The stills are now lossless PNG at two to three times their displayed size (the JPEGs'
   chroma subsampling smeared the fine colour detail): the gallery is reframed
   on each set's spiralling fixed point, the deep-zoom figure is the spiral

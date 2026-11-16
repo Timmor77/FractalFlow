@@ -20,8 +20,10 @@ Chrome and Edge, WebGL2 elsewhere).
 <p align="center">
   <!-- Shown at half its 1600 px width, so it stays sharp on high-density screens.
        Frames rendered by the WebGPU backend along the script's camera path at 4800×2700,
-       averaged 3×3 in linear light, then assembled with make_zoom_gif.py --frames-dir. -->
-  <img src="docs/zoom.webp" width="800"
+       averaged 3×3 in linear light, then assembled with make_zoom_gif.py --frames-dir.
+       AVIF with every frame a keyframe: Safari plays a WebP or inter-coded AVIF this
+       large at 1 to 3 frames per second. -->
+  <img src="docs/zoom.avif" width="800"
        alt="Continuous zoom from the whole Julia set to a magnification of 10¹⁵, rendered by the WebGPU backend">
 </p>
 

@@ -15,10 +15,15 @@ path is defined here, once, and can be drawn by either GPU backend:
 Frames are rendered at --ss times the output size and averaged down in linear
 light (the supersampling turns shimmering sub-pixel filaments into smooth
 antialiased detail; averaging in sRGB would darken them), stamped with the
-current magnification, then written as a lossy animated WebP (the default: GitHub and
-every current browser play it, at a fraction of a GIF's size on this detail) or
-as a GIF quantized to ONE palette built from frames spread over the whole zoom,
-so colours neither flicker nor drift as the palette cycles.
+current magnification, then written as one of:
+
+- an animated AVIF (the default), every frame a keyframe, encoded by ffmpeg with
+  SVT-AV1. Safari decodes a large animated WebP, or an AVIF with inter frames,
+  far too slowly: at 1600×900 it played at 1 to 3 frames per second, against 25
+  for this all-intra AVIF. Chrome plays all of them in real time.
+- a lossy animated WebP (Safari plays it smoothly only at small sizes);
+- a GIF quantized to ONE palette built from frames spread over the whole zoom,
+  so colours neither flicker nor drift as the palette cycles.
 
 The zoom is log-linear with eased ends. The centre glides from the origin to the
 target while the whole set is in view, so the first frame is the full set,
@@ -26,8 +31,9 @@ centred, rather than the set pushed to one side.
 
 The README shows the animation at HALF its pixel width (1600 px file, width="800"),
 so a high-density screen gets one image pixel per device pixel and an ordinary
-one gets a clean 2:1 reduction. The size (~50 MB) is the price of that sharpness:
-fine colour detail is what lossy coders damage first.
+one gets a clean 2:1 reduction. The size (~47 MB) is the price of that sharpness
+and of coding every frame on its own: fine colour detail is what lossy coders
+damage first.
 
 Usage:
     uv run python scripts/make_zoom_gif.py
@@ -210,6 +216,7 @@ def main() -> None:
     p.add_argument("--height", type=int, default=900)
     p.add_argument("--colors", type=int, default=256, help="GIF only")
     p.add_argument("--quality", type=int, default=90, help="WebP only, 0-100")
+    p.add_argument("--crf", type=int, default=24, help="AVIF only, SVT-AV1 CRF (lower = better)")
     p.add_argument("--duration", type=int, default=40, help="ms per frame")
     p.add_argument("--ss", type=int, default=3, help="supersampling factor (CUDA path)")
     p.add_argument(
@@ -221,7 +228,7 @@ def main() -> None:
     )
     p.add_argument("--frames-dir", help="assemble pre-rendered frames instead of calling the CUDA renderer")
     p.add_argument("--print-path", action="store_true", help="print the camera path as CSV and exit")
-    p.add_argument("--out", default=os.path.join("docs", "zoom.webp"), help=".webp (lossy) or .gif")
+    p.add_argument("--out", default=os.path.join("docs", "zoom.avif"), help=".avif, .webp (lossy) or .gif")
     args = p.parse_args()
 
     path = camera_path(args)
@@ -249,7 +256,41 @@ def main() -> None:
         frames.append(frame)
 
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
-    if args.out.lower().endswith(".webp"):
+    if args.out.lower().endswith(".avif"):
+        sequence = [frames[0]] * args.hold_start + frames + [frames[-1]] * args.hold_end
+        with tempfile.TemporaryDirectory() as tmp:
+            for i, frame in enumerate(sequence):
+                frame.save(os.path.join(tmp, f"{i:05d}.png"), compress_level=1)
+            subprocess.run(
+                [
+                    "ffmpeg", "-v", "error", "-y",
+                    "-framerate", f"{1000 / args.duration:g}",
+                    "-i", os.path.join(tmp, "%05d.png"),
+                    # sRGB pixels to BT.601 limited-range 4:2:0, every colour
+                    # field tagged in the AV1 sequence header (sRGB primaries
+                    # and transfer). Measured on one frame against its PNG: the
+                    # mean error per channel stays under one 8-bit level in
+                    # Safari and Chrome, whereas Chrome shifted the blue of an
+                    # animated BT.709 limited-range AVIF by +5 levels. At
+                    # half-size display the chroma is still one sample per CSS
+                    # pixel.
+                    "-vf",
+                    "scale=out_color_matrix=bt601:out_range=tv"
+                    ":flags=lanczos+accurate_rnd+full_chroma_int",
+                    "-pix_fmt", "yuv420p",
+                    "-colorspace", "smpte170m", "-color_range", "tv",
+                    "-svtav1-params",
+                    "color-primaries=1:transfer-characteristics=13:matrix-coefficients=6:color-range=0",
+                    # -g 1: every frame a keyframe. Inter frames compress better
+                    # but Safari then re-decodes from the last keyframe and the
+                    # animation crawls.
+                    "-c:v", "libsvtav1", "-crf", str(args.crf), "-preset", "4", "-g", "1",
+                    "-loop", "0",
+                    args.out,
+                ],
+                check=True,
+            )
+    elif args.out.lower().endswith(".webp"):
         # Lossy animated WebP: full colour, and a fraction of the GIF's size on
         # this kind of fine, noisy detail.
         sequence = [frames[0]] * args.hold_start + frames + [frames[-1]] * args.hold_end
