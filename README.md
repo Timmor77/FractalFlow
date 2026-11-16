@@ -7,41 +7,47 @@
 ![CUDA](https://img.shields.io/badge/CUDA-C%2B%2B-76b900)
 [![Technical report](https://img.shields.io/badge/Technical_report-PDF-b31b1b.svg)](paper/main.pdf)
 
-Interactive, deep-zoom **Julia set explorer**. One algorithm — *perturbation theory* —
-implemented twice, in **WGSL** (WebGPU) and **CUDA C**, with a direct double-single
-**GLSL** renderer as a shallow compatibility fallback. Both GPU paths are checked,
-pixel by pixel, against an independent arbitrary-precision reference.
+A Julia set explorer that zooms, in the browser, down to a view height of
+10⁻²⁰. Past about 10⁻¹³ plain `float64` arithmetic can no longer tell neighbouring
+pixels apart, so the deep zoom runs on *perturbation theory*, implemented twice: in
+**WGSL** for WebGPU, and in **CUDA C** for NVIDIA GPUs. Both are checked pixel by
+pixel against an independent arbitrary-precision reference. Browsers without WebGPU
+get a direct **GLSL** renderer, which only goes as deep as its arithmetic allows.
 
-**[▶ Live demo](https://timmor77.github.io/FractalFlow/)** — WebGPU in Chrome/Edge,
-automatic WebGL2 fallback elsewhere.
+**[▶ Open the live demo](https://timmor77.github.io/FractalFlow/)** (WebGPU in
+Chrome and Edge, WebGL2 elsewhere).
 
 <p align="center">
-  <!-- Native width (matches make_zoom_gif.py --width): browser upscaling would blur it. -->
-  <img src="docs/zoom.gif" width="640"
-       alt="Continuous deep zoom into the Julia set (×10⁹, rendered by the CUDA backend)">
+  <!-- Native width (matches make_zoom_gif.py --width): browser upscaling would blur it.
+       Frames rendered by the WebGPU backend along the script's camera path at 1600×900,
+       then assembled with make_zoom_gif.py --frames-dir. -->
+  <img src="docs/zoom.webp" width="800"
+       alt="Continuous zoom from the whole Julia set to a magnification of 10¹⁵, rendered by the WebGPU backend">
 </p>
+
+*From the whole set to ×10¹⁵ in ten seconds, rendered by the WebGPU backend. The
+counter shows the magnification; direct `float64` iteration gives out near ×10¹³.*
 
 ## Highlights
 
-- **Deep zoom to 10⁻²⁰, and that number is measured** — direct iteration in a
-  1080-row frame stops separating pixels below ~10⁻⁴ in `float32` and ~2×10⁻¹³ in
-  `float64`; perturbation with a double-double reference orbit takes the CUDA
-  renderer to an exact match with arbitrary precision at 10⁻¹⁶ and a handful of
+- **Deep zoom to 10⁻²⁰, a measured limit.** In a 1080-row frame, direct iteration
+  stops separating pixels below ~10⁻⁴ in `float32` and ~2×10⁻¹³ in `float64`.
+  Perturbation with a double-double reference orbit gives the CUDA renderer an
+  exact match with arbitrary precision at 10⁻¹⁶, and a handful of differing
   boundary pixels at 10⁻²⁰. The camera stops there, where the evidence stops
   ([depth sweep](paper/data/validation/depth_sweep.csv)).
 - **One recurrence, two perturbation backends**: a WGSL fragment shader (WebGPU,
-  `f32` deltas) and a native CUDA kernel (`f64` deltas), plus a WebGL2
-  compatibility renderer that iterates directly and is *not* part of the
-  deep-zoom pipeline.
+  `f32` deltas) and a native CUDA kernel (`f64` deltas). The WebGL2 renderer
+  iterates directly and is *not* part of the deep-zoom pipeline.
 - **Validated, not eyeballed**: every backend is compared with an independent
-  `mpmath` arbitrary-precision implementation, on the raw escape times as well as
-  the colours — which caught a real off-centre rebasing bug during development,
-  and later a second one in the native path's orbit encoding
+  `mpmath` arbitrary-precision implementation, on raw escape times as well as
+  colours. This caught a real off-centre rebasing bug during development, and
+  later a second one in the native path's orbit encoding
   ([Correctness](#correctness)).
-- **16K export from the browser**: the picture is rendered in tiles and encoded
-  by a streaming PNG encoder written for the purpose, so its size is not bounded
-  by the GPU's largest texture — 15360×8640 on a device whose limit is 8192 — and
-  a tiled export is pixel-identical to a single draw ([Export](#export)).
+- **16K export from the browser**: the picture is rendered in tiles and written by
+  a streaming PNG encoder, so its size is not bounded by the GPU's largest texture
+  (15360×8640 on a device whose limit is 8192). A tiled export is pixel-identical
+  to a single draw ([Export](#export)).
 - **Measured**: a nominal 1 168 GIter/s in the browser on an RTX 3060 Ti. That
   convention charges every pixel the full iteration cap; the machine really issues
   about 7% of it ([benchmarks below](#benchmarks)).
@@ -69,13 +75,13 @@ the Julia parameter `c`, PNG export, shareable link.*
 </p>
 
 *`c = 0.285 + 0.01i`, centred on its repelling fixed point at a view height of
-`1e-12` — a **3×10¹¹ magnification**. Rendered by the CUDA backend at 7680×4320
+`1e-12`, a **3×10¹¹ magnification**. Rendered by the CUDA backend at 7680×4320
 with 2 600 iterations and downsampled to 4K; [click for the full-resolution
 file](docs/renders/hero-4k.png). Direct `float64` iteration cannot separate
 neighbouring pixels at this depth.*
 
-Every image below links to the live demo with that exact view encoded in the
-URL — the share-a-view feature demonstrating itself.
+Each image below opens the live demo on that exact view: the centre, zoom, `c` and
+palette travel in the URL, which is how the app shares a view.
 
 | | |
 |:---:|:---:|
@@ -90,7 +96,7 @@ Zooming far into a fractal is a *precision* problem. Adjacent pixels in a 1080-r
 frame of height `s` are `s/1080` apart, and around `|z| = 1` consecutive `float32`
 values are ~`1e-7` apart, `float64` values ~`2e-16`. Direct iteration therefore
 stops separating neighbouring pixels below a view height of ~`1e-4` in `float32`
-and ~`2e-13` in `float64` — sooner at higher resolution, later near the origin.
+and ~`2e-13` in `float64` (sooner at higher resolution, later near the origin).
 The trick that unlocks real depth is **perturbation**:
 
 1. Compute the orbit of a single **reference point** (the view centre) **once on the
@@ -109,13 +115,13 @@ z_n = Z[m] + δ                     // full value (Z = reference orbit)
 Glitches and an escaping reference are handled with **Zhuoran rebasing**: when `δ` loses
 precision (`|z − Z₀| < |δ|`) or the reference runs out, we restart from `Z[0]` with
 `δ = z − Z₀`. The GPU never forms a pixel's exact coordinate as `centre + tiny offset`
-in low precision — it gets the reference orbit and a small per-pixel delta — which is
+in low precision: it gets the reference orbit and a small per-pixel delta. That is
 why the shader is *simpler* than a naïve high-precision one, and much faster.
 
 One subtlety, and the bug that took longest to find: the reference orbit is uploaded
 **relative to Z₀** (`D[m] = Z[m] − Z₀`, subtracted in double-double). Absolute orbit
 values would quantise the rebased delta `D[m] + δ` to the grid of O(1) numbers in the
-upload format — ~`1e-7` in `f32`, ~`2e-16` in `f64`. Near a fixed point, where deltas
+upload format: ~`1e-7` in `f32`, ~`2e-16` in `f64`. Near a fixed point, where deltas
 shrink with the zoom, neighbouring pixels then collapse onto the same delta and the
 image dissolves into blocky noise: from ~`1e-5` down in the browser, from ~`1e-13` down
 in CUDA. As offsets, both terms are small exactly when precision matters. Rendering the
@@ -128,13 +134,15 @@ is `1e-20`: not the representation's limit, but the deepest scale where the froz
 validation still holds (see [Correctness](#correctness)).
 
 <p align="center">
-  <img src="docs/deep-zoom.jpg" width="620"
-       alt="In-browser render at ×1,000,000 zoom near a repelling fixed point of z²+c">
+  <img src="docs/deep-zoom.jpg" width="820"
+       alt="Spiral of the Julia set rendered in the browser at a view height of 3e-14, centred on a repelling fixed point of z²+c">
 </p>
 
-*Rendered in the browser at ×10⁶ zoom, centred on a repelling fixed point of
-`z² + c` — a point that provably lies on the Julia set, so there is structure at
-every depth.*
+*Rendered in the browser by the WebGPU backend at a view height of `3e-14` (×10¹⁴),
+where direct `float64` iteration no longer separates pixels. The centre is the
+repelling fixed point of `z² + c` near `−0.53 + 0.08i`: it lies on the Julia set, so
+there is structure at every depth. Around it, `z² + c` turns the plane by 172° while
+stretching it by only 1.07, which winds the set into this spiral.*
 
 ## Architecture
 
@@ -163,14 +171,14 @@ scripts/
   reference_julia.py    # mpmath ground-truth renderer (validation) + CPU baseline
   validate_release.py   # the release matrix: CUDA vs mpmath, with thresholds
   benchmark.py          # benchmark CSVs → summary + charts
-  make_zoom_gif.py      # renders the hero GIF via the CUDA backend
+  make_zoom_gif.py      # the hero animation's camera path, rendered via CUDA or assembled
 paper/                  # technical report: source, frozen data, generated figures
 tests/                  # vitest suite (math core, camera, export, encoder, loop)
 ```
 
 A backend implements one small interface (`Renderer` in
 [`core/types.ts`](src/core/types.ts)): draw the view on the canvas, and draw one
-tile of a larger picture off-screen. Everything else — camera, loop, export, UI —
+tile of a larger picture off-screen. Everything else (camera, loop, export, UI)
 is backend-agnostic and unit-tested without a GPU.
 
 | Backend | Delta precision | Zoom floor | Role |
@@ -183,8 +191,8 @@ is backend-agnostic and unit-tested without a GPU.
 
 "Save image" produces a PNG of the current view at 4K, 8K or 16K (longest side).
 Drawing 132 million pixels at up to 4 000 iterations each in one draw call is not an
-option: it would keep the GPU busy for seconds — long enough for a driver watchdog to
-reset it on modest hardware — and a 16K render target does not exist on a device whose
+option: it would keep the GPU busy for seconds, long enough for a driver watchdog to
+reset it on modest hardware, and a 16K render target does not exist on a device whose
 largest texture is 8192. So the export never holds the picture whole:
 
 - the GPU draws **512-pixel tiles** into a small off-screen target. The shader maps
@@ -208,14 +216,14 @@ is 8192.
 
 Same view, schedule and counting convention on both GPU backends: 13 zoom depths from
 `3` down to `3×10⁻¹²`, `maxIter = min(300 + 800k, 4000)`, at 1920×1080, on an
-**RTX 3060 Ti**. Not the same *work*, though — the precisions differ by design, the
+**RTX 3060 Ti**. Not the same *work*, though: the precisions differ by design, the
 timing methods differ (see below), and the CPU baseline is a single shallow anchor
 with colouring excluded.
 
 ![Iteration throughput vs zoom depth](docs/bench_giter.png)
 
 The counter-intuitive headline: **the browser out-runs native CUDA by ~16×** here.
-Not magic, and not a browser-versus-native result — the WebGPU shader iterates deltas
+Not magic, and not a browser-versus-native result: the WebGPU shader iterates deltas
 in `f32` while the CUDA kernel uses `f64`, and consumer Ampere executes fp64 at 1/64
 of the fp32 rate. The measured gap is far *smaller* than that 64:1, because the `f32`
 kernel is nowhere near its arithmetic ceiling (divergence and control flow dominate)
@@ -227,12 +235,12 @@ the precision-critical work once on the CPU, let the GPU crunch cheap deltas.
 Peak numbers, both at `scale = 3×10⁻⁶`: **1,168 GIter/s / 292 Mpix/s** (WebGPU,
 f32) vs **70.8 GIter/s / 17.7 Mpix/s** (CUDA, f64), against **0.023 GIter/s** for
 vectorized NumPy float64. The nominal CPU→GPU ratio is ~51 000×, but NumPy has no
-early exit while the GPU rate charges iterations that never ran — correcting for
+early exit while the GPU rate charges iterations that never ran. Correcting for
 that (see below) puts the honest ratio nearer ~2 000×.
 
 These figures were recorded for release 1.2.0. The WGSL loop has since been tightened
-— it reads the reference orbit once per iteration instead of twice, with bit-identical
-output — which lowered frame times by about 10% at the deep end of the schedule on an
+(it reads the reference orbit once per iteration instead of twice, with bit-identical
+output), which lowered frame times by about 10% at the deep end of the schedule on an
 Apple M5 Pro. The RTX 3060 Ti was not re-measured, so the charts above understate the
 current shader by an unknown margin.
 
@@ -247,15 +255,15 @@ current shader by an unknown margin.
 - GIter/s counts `pixels × maxIter` and is therefore an *upper bound* (escaped pixels
   stop early). The convention is identical across backends, so backend-to-backend
   comparisons hold. How large the gap is: at the peak depth the average pixel escapes
-  after 159 of the 4000 permitted iterations, i.e. 4% — measure it yourself with
+  after 159 of the 4000 permitted iterations, i.e. 4%. Measure it yourself with
   `python scripts/reference_julia.py --escape-stats`.
 - The reference orbit is excluded from the timed region on both paths: cached in the
   browser, recomputed and uploaded before the events on CUDA. So these numbers are the
-  cost of *redrawing* a view, not of opening a new one — a fresh view adds one CPU
+  cost of *redrawing* a view, not of opening a new one: a fresh view adds one CPU
   double-double orbit (a few ms at the iteration cap) plus its upload.
 - The browser run starts with an overhead probe: the same measured path at
   `maxIter = 1`, where the shader does nothing. What it reports is command encoding,
-  submission and the wait — a fixed cost inside the browser timing that CUDA's event
+  submission and the wait, a fixed cost inside the browser timing that CUDA's event
   window excludes. Correcting for it would widen the browser's lead, not narrow it.
 - Every sample includes a mean-luma readback to reject silently-black frames, and the
   WebGPU adapter/browser identity is recorded in its CSV header; the full host,
@@ -263,7 +271,7 @@ current shader by an unknown margin.
 - The WebGL2 fallback is deliberately **excluded** from the charts: under ANGLE/D3D11
   its double-single compensated arithmetic is compiled with fast-math and collapses to
   plain `f32`, so beyond shallow depths its output no longer matches the validated
-  backends — and throughput of a wrong image is meaningless. The app now detects this
+  backends, and throughput of a wrong image is meaningless. The app now detects this
   at start-up (a 1×1 probe shader), warns in the console and caps the zoom accordingly.
   On this machine the probe fails, which is why the fallback stops at `1e-4` here.
 - One machine, one driver, one browser build. These curves rank two implementations on
@@ -307,7 +315,7 @@ escaped/not-escaped flips.
 Colours are compared, but they are not the only thing compared: both renderers also
 emit the raw smooth iteration count (`julia.exe --raw`), and the harness checks that
 directly, with a tolerance of 0.01 iterations. That separates arithmetic from
-palette — the two pixels that differ in the overview case turn out to have *identical*
+palette: the two pixels that differ in the overview case turn out to have *identical*
 escape times, so that difference is colour rounding and nothing else.
 
 Two cases match the arbitrary-precision reference *exactly*, including one four orders
@@ -337,11 +345,11 @@ escape times and prints a verdict:
 | Below binary64 | `1e-16` | 0.95% | 1.32% | 2×10⁻⁴ |
 | Deepest validated | `1e-20` | 2.03% | 10.21% | 4×10⁻⁴ |
 
-*Apple M5 Pro (Metal), Chromium 156 —
+*Apple M5 Pro (Metal), Chromium 156.
 [data](paper/data/validation/webgpu_validation_apple_m5_pro.csv).*
 
 Read it in two parts. The **median** error is at most 4×10⁻⁴ of an iteration: nothing
-is systematically off — an off-by-one in the count or a shifted pixel grid would move
+is systematically off; an off-by-one in the count or a shifted pixel grid would move
 it to about 1. The **tail** is chaos: near the Julia set a rounding error doubles
 every iteration or so, and a pixel that needs hundreds of iterations to escape has
 forgotten its `f32` low bits long before. The two cases that sit on the boundary at
@@ -381,7 +389,7 @@ references from source and checks every archived file of the report against its
 manifest. The GPU kernels themselves cannot run on a hosted runner; they are
 validated by the two harnesses above.
 
-## Run it — browser
+## Run it: browser
 
 ```bash
 npm install
@@ -398,15 +406,15 @@ pan, pinch = zoom · keyboard: arrows = pan, `+` / `-` = zoom · `R` = reset ·
 
 The bottom-right panel offers colour palettes, a mini-Mandelbrot map to pick the
 Julia `c` (drag the marker or type values), PNG export at 4K / 8K / 16K, and a
-**shareable link** — the view (centre, zoom, `c`, palette) lives in the URL hash.
+**shareable link**: the view (centre, zoom, `c`, palette) lives in the URL hash.
 
 Two more pages, for measurements: `/?bench` (throughput across zoom depths) and
 `/?validate` (WebGPU against the archived references; dev server only, since the
 reference data lives in the repository).
 
-## Run it — CUDA (NVIDIA)
+## Run it: CUDA (NVIDIA)
 
-Requires the CUDA Toolkit (`nvcc`) and a host C++ compiler — see [cuda/README.md](cuda/README.md).
+Requires the CUDA Toolkit (`nvcc`) and a host C++ compiler (see [cuda/README.md](cuda/README.md)).
 
 ```bash
 cd cuda
@@ -422,7 +430,7 @@ nvcc -O3 julia.cu -o julia
 ./julia --bench --w 1920 --h 1080 --out ../artifacts/cuda_bench.csv
 ```
 
-## Run it — Python tooling (`uv`)
+## Run it: Python tooling (`uv`)
 
 Python provides an **independent ground truth** to validate the GPU backends.
 
@@ -437,7 +445,7 @@ uv run python scripts/reference_julia.py --hp --w 64 --h 64 \
 # CPU baseline for the benchmark charts:
 uv run python scripts/reference_julia.py --bench
 
-# CPU-only self-check (float64 vs mpmath) — what CI runs:
+# CPU-only self-check (float64 vs mpmath), what CI runs:
 uv run python scripts/reference_julia.py --selftest
 
 # Full release matrix (needs the CUDA binary), and the depth sweep behind the floor.
@@ -455,7 +463,7 @@ uv run python paper/generate_figures.py --check
 # Benchmark CSVs -> summary + charts:
 uv run python scripts/benchmark.py
 
-# Hero GIF (requires the CUDA renderer):
+# Hero animation (CUDA renderer, or --frames-dir with frames from another backend):
 uv run python scripts/make_zoom_gif.py
 ```
 
@@ -492,7 +500,7 @@ added only after the corresponding Zenodo records have been published.
 
 ## License
 
-[Apache License 2.0](LICENSE) — free to use, modify and distribute, including
+[Apache License 2.0](LICENSE): free to use, modify and distribute, including
 commercially, with attribution and an explicit patent grant. Copyright 2026
 Timofei Amosov. `cuda/stb_image_write.h` keeps its own dual MIT/public-domain
 license (nothings/stb).
