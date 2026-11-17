@@ -244,10 +244,7 @@ timing methods differ (see below), and the CPU baseline is a single shallow anch
 with colouring excluded.
 
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/bench_giter-dark.png">
-    <img src="docs/bench_giter.png" width="820" alt="Iteration throughput vs zoom depth, WebGPU and CUDA on an RTX 3060 Ti">
-  </picture>
+  <img src="docs/bench_giter.png" width="820" alt="Iteration throughput vs zoom depth, WebGPU and CUDA on an RTX 3060 Ti">
 </p>
 
 The counter-intuitive headline: **the browser out-runs native CUDA by ~16×** here.
@@ -259,10 +256,7 @@ while the `f64` one is close to its own. That trade is what perturbation exploit
 the precision-critical work once on the CPU, let the GPU crunch cheap deltas.
 
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/bench_mpix-dark.png">
-    <img src="docs/bench_mpix.png" width="820" alt="Effective fill rate vs zoom depth, WebGPU and CUDA on an RTX 3060 Ti">
-  </picture>
+  <img src="docs/bench_mpix.png" width="820" alt="Effective fill rate vs zoom depth, WebGPU and CUDA on an RTX 3060 Ti">
 </p>
 
 Peak numbers, both at `scale = 3×10⁻⁶`: **1 168 GIter/s / 292 Mpix/s** (WebGPU,
@@ -320,7 +314,7 @@ cuda/julia.exe --bench --w 1920 --h 1080 --out artifacts/cuda_bench.csv
 # 3) CPU baseline (writes artifacts/cpu_bench.csv)
 uv run python scripts/reference_julia.py --bench
 
-# 4) Charts (writes docs/bench_giter.png, docs/bench_mpix.png and their -dark twins).
+# 4) Charts (writes docs/bench_giter.png, docs/bench_mpix.png).
 #    The charts above are drawn from the frozen data: --dir paper/data/benchmark
 uv run python scripts/benchmark.py
 ```

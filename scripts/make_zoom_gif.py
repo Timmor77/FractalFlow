@@ -31,9 +31,11 @@ centred, rather than the set pushed to one side.
 
 The README shows the animation at HALF its pixel width (1600 px file, width="800"),
 so a high-density screen gets one image pixel per device pixel and an ordinary
-one gets a clean 2:1 reduction. The size (~47 MB) is the price of that sharpness
+one gets a clean 2:1 reduction. The size (~41 MB) is the price of that sharpness
 and of coding every frame on its own: fine colour detail is what lossy coders
-damage first.
+damage first. Inter frames would not buy much here anyway: each frame of a
+zoom this fast is mostly new detail, and SVT-AV1 at the same CRF produced a
+file within 1% of the all-intra one.
 
 Usage:
     uv run python scripts/make_zoom_gif.py
@@ -210,8 +212,8 @@ def main() -> None:
     p.add_argument("--start-scale", type=float, default=3.0)
     p.add_argument("--end-scale", type=float, default=3e-15)
     p.add_argument("--frames", type=int, default=220)
-    p.add_argument("--hold-start", type=int, default=12, help="extra copies of the first frame")
-    p.add_argument("--hold-end", type=int, default=30, help="extra copies of the last frame")
+    p.add_argument("--hold-start", type=int, default=12, help="extra frame times on the first frame")
+    p.add_argument("--hold-end", type=int, default=30, help="extra frame times on the last frame")
     p.add_argument("--width", type=int, default=1600)
     p.add_argument("--height", type=int, default=900)
     p.add_argument("--colors", type=int, default=256, help="GIF only")
@@ -256,16 +258,31 @@ def main() -> None:
         frames.append(frame)
 
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
+    seconds = (args.hold_start + len(frames) + args.hold_end) * args.duration / 1000
     if args.out.lower().endswith(".avif"):
-        sequence = [frames[0]] * args.hold_start + frames + [frames[-1]] * args.hold_end
+        # The holds are display durations, not copies: every AVIF frame is coded
+        # on its own, so 42 copies of the end frames used to cost 5.5 MB for two
+        # still images. ffmpeg's concat demuxer carries the durations; it drops
+        # the last entry's, so the last frame is listed once more for one frame
+        # time, which keeps the loop at the same length.
+        step = args.duration / 1000
+        timeline = [(0, step * (1 + args.hold_start))]
+        timeline += [(i, step) for i in range(1, len(frames) - 1)]
+        if args.hold_end:
+            timeline += [(len(frames) - 1, step * args.hold_end), (len(frames) - 1, step)]
+        else:
+            timeline += [(len(frames) - 1, step)]
         with tempfile.TemporaryDirectory() as tmp:
-            for i, frame in enumerate(sequence):
+            for i, frame in enumerate(frames):
                 frame.save(os.path.join(tmp, f"{i:05d}.png"), compress_level=1)
+            listing = os.path.join(tmp, "frames.txt")
+            with open(listing, "w") as f:
+                for i, seconds_shown in timeline:
+                    f.write(f"file '{i:05d}.png'\nduration {seconds_shown:.6f}\n")
             subprocess.run(
                 [
                     "ffmpeg", "-v", "error", "-y",
-                    "-framerate", f"{1000 / args.duration:g}",
-                    "-i", os.path.join(tmp, "%05d.png"),
+                    "-f", "concat", "-i", listing, "-fps_mode", "vfr",
                     # sRGB pixels to BT.601 limited-range 4:2:0, every colour
                     # field tagged in the AV1 sequence header (sRGB primaries
                     # and transfer). Measured on one frame against its PNG: the
@@ -281,9 +298,9 @@ def main() -> None:
                     "-colorspace", "smpte170m", "-color_range", "tv",
                     "-svtav1-params",
                     "color-primaries=1:transfer-characteristics=13:matrix-coefficients=6:color-range=0",
-                    # -g 1: every frame a keyframe. Inter frames compress better
-                    # but Safari then re-decodes from the last keyframe and the
-                    # animation crawls.
+                    # -g 1: every frame a keyframe. Inter frames barely compress
+                    # this zoom better, and Safari then re-decodes from the last
+                    # keyframe and the animation crawls.
                     "-c:v", "libsvtav1", "-crf", str(args.crf), "-preset", "4", "-g", "1",
                     "-loop", "0",
                     args.out,
@@ -325,8 +342,7 @@ def main() -> None:
             optimize=True,
         )
     size_mb = os.path.getsize(args.out) / 1e6
-    seconds = len(sequence) * args.duration / 1000
-    print(f"-> {args.out} ({size_mb:.2f} MB, {len(sequence)} frames, {seconds:.1f} s)")
+    print(f"-> {args.out} ({size_mb:.2f} MB, {len(frames)} frames, {seconds:.1f} s)")
     # GitHub refuses files over 100 MB in a push (and warns from 50 MB).
     if size_mb > 95:
         print("Over the 95 MB budget: retry with fewer frames or a lower quality.")

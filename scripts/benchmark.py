@@ -13,7 +13,7 @@ Prints a summary table and writes two charts to docs/:
     docs/bench_giter.png   GIter/s vs zoom depth (the headline chart)
     docs/bench_mpix.png    effective Mpix/s vs zoom depth (log scale)
 
-each with a "-dark" twin for GitHub's dark theme.
+on a transparent background, legible on GitHub's light and dark themes.
 
 Usage:
     uv run python scripts/benchmark.py [--gpu-label "RTX 3060 Ti"]
@@ -31,7 +31,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-# (filename stem, display label, marker); colours are per theme, in LINE_COLOURS
+# (filename stem, display label, marker); colours are in LINE_COLOURS
 # The delta precision matters when reading the charts: consumer Ampere runs
 # fp64 at 1/64 of fp32 rate, which is why the browser's f32 perturbation
 # out-runs native CUDA's f64 one.
@@ -94,36 +94,28 @@ def main() -> None:
 
     os.makedirs(args.out, exist_ok=True)
     title_suffix = f"{args.gpu_label}, 1920×1080"
-    for theme, suffix in (("light", ""), ("dark", "-dark")):
-        plot(
-            data,
-            "giter",
-            "GIter/s (perturbation iterations, upper bound, log)",
-            f"Iteration throughput vs zoom depth, {title_suffix}",
-            os.path.join(args.out, f"bench_giter{suffix}.png"),
-            theme,
-            cpu_giter,
-        )
-        plot(
-            data,
-            "mpix",
-            "effective Mpix/s (log)",
-            f"Fill rate vs zoom depth, {title_suffix}",
-            os.path.join(args.out, f"bench_mpix{suffix}.png"),
-            theme,
-        )
+    plot(
+        data,
+        "giter",
+        "GIter/s (perturbation iterations, upper bound, log)",
+        f"Iteration throughput vs zoom depth, {title_suffix}",
+        os.path.join(args.out, "bench_giter.png"),
+        cpu_giter,
+    )
+    plot(
+        data,
+        "mpix",
+        "effective Mpix/s (log)",
+        f"Fill rate vs zoom depth, {title_suffix}",
+        os.path.join(args.out, "bench_mpix.png"),
+    )
 
 
-# Colours per theme. The dark set matches GitHub's dark page background, so the
-# README can swap charts with <picture> and prefers-color-scheme.
-THEMES = {
-    "light": {"bg": "#ffffff", "fg": "#1f2328", "muted": "#59636e", "grid": "#d1d9e0"},
-    "dark": {"bg": "#0d1117", "fg": "#f0f6fc", "muted": "#9198a1", "grid": "#3d444d"},
-}
-LINE_COLOURS = {
-    "light": {"cuda": "#2da44e", "webgpu": "#0969da", "webgl2": "#bc4c00"},
-    "dark": {"cuda": "#3fb950", "webgpu": "#4493f8", "webgl2": "#f0883e"},
-}
+# The charts have a transparent background, so they sit on the page whatever its
+# theme. Every colour below keeps a contrast of at least 3.3:1 (text: 4.1:1)
+# against both GitHub's light (#ffffff) and dark (#0d1117) backgrounds.
+INK = "#6e7781"
+LINE_COLOURS = {"cuda": "#2ea043", "webgpu": "#1f6feb", "webgl2": "#db6d28"}
 
 
 def plot(
@@ -132,38 +124,36 @@ def plot(
     ylabel: str,
     title: str,
     path: str,
-    theme: str,
     cpu_giter: float | None = None,
 ) -> None:
     """One chart, log-log, deeper zoom to the right, at 2× for high-density screens."""
-    t = THEMES[theme]
     with plt.rc_context(
         {
-            "text.color": t["fg"],
-            "axes.labelcolor": t["fg"],
-            "axes.edgecolor": t["muted"],
-            "xtick.color": t["fg"],
-            "ytick.color": t["fg"],
+            "text.color": INK,
+            "axes.labelcolor": INK,
+            "axes.edgecolor": INK,
+            "xtick.color": INK,
+            "ytick.color": INK,
             "font.size": 10,
         }
     ):
         fig, ax = plt.subplots(figsize=(8, 4.5), dpi=300)
-        fig.patch.set_facecolor(t["bg"])
-        ax.set_facecolor(t["bg"])
+        fig.patch.set_alpha(0)
+        ax.patch.set_alpha(0)
         for stem, label, marker in BACKENDS:
             if stem in data:
                 rows = data[stem]
                 ax.plot(
                     [r["scale"] for r in rows],
                     [r[key] for r in rows],
-                    color=LINE_COLOURS[theme][stem],
+                    color=LINE_COLOURS[stem],
                     marker=marker,
                     markersize=5,
-                    linewidth=1.8,
+                    linewidth=2,
                     label=label,
                 )
         if cpu_giter is not None:
-            ax.axhline(cpu_giter, color=t["muted"], linestyle="--", linewidth=1.2)
+            ax.axhline(cpu_giter, color=INK, linestyle="--", linewidth=1.2)
             ax.annotate(
                 f"NumPy float64 (CPU, vectorized): {cpu_giter:.3f} GIter/s",
                 xy=(0.02, cpu_giter),
@@ -171,21 +161,18 @@ def plot(
                 textcoords="offset points",
                 xytext=(0, 5),
                 fontsize=8,
-                color=t["muted"],
             )
         ax.set_xscale("log")
         ax.invert_xaxis()  # deep zoom towards the right
         ax.set_xlabel("view scale (complex-plane height), deeper zoom →")
-        ax.grid(color=t["grid"], linewidth=0.8)
+        ax.grid(color=INK, alpha=0.3, linewidth=0.8)
         ax.set_axisbelow(True)
         ax.set_yscale("log")
         ax.set_ylabel(ylabel)
         ax.set_title(title)
-        legend = ax.legend(loc="best", fontsize=9, facecolor=t["bg"], edgecolor=t["grid"])
-        for text in legend.get_texts():
-            text.set_color(t["fg"])
+        ax.legend(loc="best", fontsize=9, frameon=False)
         fig.tight_layout()
-        fig.savefig(path, facecolor=t["bg"])
+        fig.savefig(path, transparent=True)
         plt.close(fig)
     print(f"-> {path}")
 

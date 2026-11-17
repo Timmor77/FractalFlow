@@ -42,8 +42,11 @@ Notable changes to FractalFlow. The format follows
   linear light to 1600×900 and shown at half size, so it stays sharp on
   high-density screens. It is an AVIF with every frame a keyframe: Safari
   played the same animation as a WebP at about 1.4 frames per second, and as an
-  inter-coded AVIF at about 3; this one plays at 25 in Safari and Chrome.
-  `scripts/make_zoom_gif.py` gains the new camera path, linear-light
+  inter-coded AVIF at about 3; this one plays at 25 in Safari and Chrome. The
+  pauses at both ends are frame durations rather than copies of the frame,
+  which takes the file from 46.8 to 41.4 MB with the same 220 frames, bit for
+  bit; Safari shows nothing until the whole file has arrived, so its wait
+  shrinks in proportion. `scripts/make_zoom_gif.py` gains the new camera path, linear-light
   downsampling, `--frames-dir`, `--print-path` and AVIF (via ffmpeg and
   SVT-AV1) and WebP output. The stills are now lossless PNG at two to three
   times their displayed size (the JPEGs' chroma subsampling smeared the fine
@@ -53,8 +56,9 @@ Notable changes to FractalFlow. The format follows
 - The README's benchmark charts are redrawn from the frozen 1.2.0 data in
   `paper/data/benchmark/`. They had been plotted from an earlier run and showed
   a WebGPU peak near 900 GIter/s, against the 1 168 the text and the report
-  cite. `scripts/benchmark.py` now draws them at 2× with a dark-theme twin,
-  which the README picks with `prefers-color-scheme`.
+  cite. `scripts/benchmark.py` now draws them at 2× on a transparent
+  background, in colours that keep their contrast on GitHub's light and dark
+  themes.
 - The WGSL iteration reads the reference orbit once per iteration instead of
   twice (the value fetched for the rebasing test is carried to the next
   iteration). Output is bit-identical; frame time dropped by about 10% at the
