@@ -13,8 +13,11 @@ Prints a summary table and writes two charts to docs/:
     docs/bench_giter.png   GIter/s vs zoom depth (the headline chart)
     docs/bench_mpix.png    effective Mpix/s vs zoom depth (log scale)
 
+each with a "-dark" twin for GitHub's dark theme.
+
 Usage:
     uv run python scripts/benchmark.py [--gpu-label "RTX 3060 Ti"]
+    uv run python scripts/benchmark.py --dir paper/data/benchmark   # the README charts
 """
 
 from __future__ import annotations
@@ -28,14 +31,14 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-# (filename stem, display label, colour, marker)
+# (filename stem, display label, marker); colours are per theme, in LINE_COLOURS
 # The delta precision matters when reading the charts: consumer Ampere runs
 # fp64 at 1/64 of fp32 rate, which is why the browser's f32 perturbation
 # out-runs native CUDA's f64 one.
 BACKENDS = [
-    ("cuda", "CUDA (native, f64 delta)", "tab:green", "o"),
-    ("webgpu", "WebGPU (browser, f32 delta)", "tab:blue", "s"),
-    ("webgl2", "WebGL2 (browser fallback)", "tab:orange", "^"),
+    ("cuda", "CUDA (native, f64 delta)", "o"),
+    ("webgpu", "WebGPU (browser, f32 delta)", "s"),
+    ("webgl2", "WebGL2 (browser fallback)", "^"),
 ]
 
 
@@ -57,13 +60,6 @@ def read_csv(path: str) -> list[dict[str, float]]:
     return rows
 
 
-def style_axes(ax) -> None:
-    ax.set_xscale("log")
-    ax.invert_xaxis()  # deep zoom towards the right
-    ax.set_xlabel("view scale (complex-plane height) — deeper zoom →")
-    ax.grid(alpha=0.3)
-
-
 def main() -> None:
     p = argparse.ArgumentParser(description="Plot FractalFlow benchmark CSVs")
     p.add_argument("--dir", default="artifacts", help="directory holding the CSVs")
@@ -72,7 +68,7 @@ def main() -> None:
     args = p.parse_args()
 
     data: dict[str, list[dict[str, float]]] = {}
-    for stem, label, _, _ in BACKENDS:
+    for stem, label, _ in BACKENDS:
         path = os.path.join(args.dir, f"{stem}_bench.csv")
         if os.path.exists(path):
             data[stem] = read_csv(path)
@@ -97,70 +93,101 @@ def main() -> None:
         return
 
     os.makedirs(args.out, exist_ok=True)
-
-    # --- Chart 1: GIter/s vs depth (headline) ---
-    fig, ax = plt.subplots(figsize=(8, 4.5), dpi=150)
-    fig.patch.set_facecolor("white")
-    ax.set_facecolor("white")
-    for stem, label, color, marker in BACKENDS:
-        if stem in data:
-            rows = data[stem]
-            ax.plot(
-                [r["scale"] for r in rows],
-                [r["giter"] for r in rows],
-                color=color,
-                marker=marker,
-                markersize=5,
-                linewidth=1.8,
-                label=label,
-            )
-    if cpu_giter is not None:
-        ax.axhline(cpu_giter, color="grey", linestyle="--", linewidth=1.2)
-        ax.annotate(
-            f"NumPy float64 (CPU, vectorized): {cpu_giter:.3f} GIter/s",
-            xy=(0.02, cpu_giter),
-            xycoords=("axes fraction", "data"),
-            textcoords="offset points",
-            xytext=(0, 5),
-            fontsize=8,
-            color="dimgrey",
+    title_suffix = f"{args.gpu_label}, 1920×1080"
+    for theme, suffix in (("light", ""), ("dark", "-dark")):
+        plot(
+            data,
+            "giter",
+            "GIter/s (perturbation iterations, upper bound, log)",
+            f"Iteration throughput vs zoom depth, {title_suffix}",
+            os.path.join(args.out, f"bench_giter{suffix}.png"),
+            theme,
+            cpu_giter,
         )
-    style_axes(ax)
-    ax.set_yscale("log")
-    ax.set_ylabel("GIter/s (perturbation iterations, upper bound, log)")
-    ax.set_title(f"Iteration throughput vs zoom depth — {args.gpu_label}, 1920×1080")
-    ax.legend(loc="best", fontsize=9)
-    fig.tight_layout()
-    giter_path = os.path.join(args.out, "bench_giter.png")
-    fig.savefig(giter_path, facecolor="white")
-    print(f"-> {giter_path}")
+        plot(
+            data,
+            "mpix",
+            "effective Mpix/s (log)",
+            f"Fill rate vs zoom depth, {title_suffix}",
+            os.path.join(args.out, f"bench_mpix{suffix}.png"),
+            theme,
+        )
 
-    # --- Chart 2: effective Mpix/s vs depth ---
-    fig, ax = plt.subplots(figsize=(8, 4.5), dpi=150)
-    fig.patch.set_facecolor("white")
-    ax.set_facecolor("white")
-    for stem, label, color, marker in BACKENDS:
-        if stem in data:
-            rows = data[stem]
-            ax.plot(
-                [r["scale"] for r in rows],
-                [r["mpix"] for r in rows],
-                color=color,
-                marker=marker,
-                markersize=5,
-                linewidth=1.8,
-                label=label,
+
+# Colours per theme. The dark set matches GitHub's dark page background, so the
+# README can swap charts with <picture> and prefers-color-scheme.
+THEMES = {
+    "light": {"bg": "#ffffff", "fg": "#1f2328", "muted": "#59636e", "grid": "#d1d9e0"},
+    "dark": {"bg": "#0d1117", "fg": "#f0f6fc", "muted": "#9198a1", "grid": "#3d444d"},
+}
+LINE_COLOURS = {
+    "light": {"cuda": "#2da44e", "webgpu": "#0969da", "webgl2": "#bc4c00"},
+    "dark": {"cuda": "#3fb950", "webgpu": "#4493f8", "webgl2": "#f0883e"},
+}
+
+
+def plot(
+    data: dict[str, list[dict[str, float]]],
+    key: str,
+    ylabel: str,
+    title: str,
+    path: str,
+    theme: str,
+    cpu_giter: float | None = None,
+) -> None:
+    """One chart, log-log, deeper zoom to the right, at 2× for high-density screens."""
+    t = THEMES[theme]
+    with plt.rc_context(
+        {
+            "text.color": t["fg"],
+            "axes.labelcolor": t["fg"],
+            "axes.edgecolor": t["muted"],
+            "xtick.color": t["fg"],
+            "ytick.color": t["fg"],
+            "font.size": 10,
+        }
+    ):
+        fig, ax = plt.subplots(figsize=(8, 4.5), dpi=300)
+        fig.patch.set_facecolor(t["bg"])
+        ax.set_facecolor(t["bg"])
+        for stem, label, marker in BACKENDS:
+            if stem in data:
+                rows = data[stem]
+                ax.plot(
+                    [r["scale"] for r in rows],
+                    [r[key] for r in rows],
+                    color=LINE_COLOURS[theme][stem],
+                    marker=marker,
+                    markersize=5,
+                    linewidth=1.8,
+                    label=label,
+                )
+        if cpu_giter is not None:
+            ax.axhline(cpu_giter, color=t["muted"], linestyle="--", linewidth=1.2)
+            ax.annotate(
+                f"NumPy float64 (CPU, vectorized): {cpu_giter:.3f} GIter/s",
+                xy=(0.02, cpu_giter),
+                xycoords=("axes fraction", "data"),
+                textcoords="offset points",
+                xytext=(0, 5),
+                fontsize=8,
+                color=t["muted"],
             )
-    style_axes(ax)
-    ax.set_yscale("log")
-    ax.set_ylabel("effective Mpix/s (log)")
-    ax.set_title(f"Fill rate vs zoom depth — {args.gpu_label}, 1920×1080")
-    ax.legend(loc="best", fontsize=9)
-    fig.tight_layout()
-    mpix_path = os.path.join(args.out, "bench_mpix.png")
-    fig.savefig(mpix_path, facecolor="white")
-    print(f"-> {mpix_path}")
-
+        ax.set_xscale("log")
+        ax.invert_xaxis()  # deep zoom towards the right
+        ax.set_xlabel("view scale (complex-plane height), deeper zoom →")
+        ax.grid(color=t["grid"], linewidth=0.8)
+        ax.set_axisbelow(True)
+        ax.set_yscale("log")
+        ax.set_ylabel(ylabel)
+        ax.set_title(title)
+        legend = ax.legend(loc="best", fontsize=9, facecolor=t["bg"], edgecolor=t["grid"])
+        for text in legend.get_texts():
+            text.set_color(t["fg"])
+        fig.tight_layout()
+        fig.savefig(path, facecolor=t["bg"])
+        plt.close(fig)
+    print(f"-> {path}")
 
 if __name__ == "__main__":
     main()

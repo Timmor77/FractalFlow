@@ -243,7 +243,12 @@ Same view, schedule and counting convention on both GPU backends: 13 zoom depths
 timing methods differ (see below), and the CPU baseline is a single shallow anchor
 with colouring excluded.
 
-![Iteration throughput vs zoom depth](docs/bench_giter.png)
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/bench_giter-dark.png">
+    <img src="docs/bench_giter.png" width="820" alt="Iteration throughput vs zoom depth, WebGPU and CUDA on an RTX 3060 Ti">
+  </picture>
+</p>
 
 The counter-intuitive headline: **the browser out-runs native CUDA by ~16×** here.
 Not magic, and not a browser-versus-native result: the WebGPU shader iterates deltas
@@ -253,9 +258,14 @@ kernel is nowhere near its arithmetic ceiling (divergence and control flow domin
 while the `f64` one is close to its own. That trade is what perturbation exploits: do
 the precision-critical work once on the CPU, let the GPU crunch cheap deltas.
 
-![Effective fill rate vs zoom depth](docs/bench_mpix.png)
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/bench_mpix-dark.png">
+    <img src="docs/bench_mpix.png" width="820" alt="Effective fill rate vs zoom depth, WebGPU and CUDA on an RTX 3060 Ti">
+  </picture>
+</p>
 
-Peak numbers, both at `scale = 3×10⁻⁶`: **1,168 GIter/s / 292 Mpix/s** (WebGPU,
+Peak numbers, both at `scale = 3×10⁻⁶`: **1 168 GIter/s / 292 Mpix/s** (WebGPU,
 f32) vs **70.8 GIter/s / 17.7 Mpix/s** (CUDA, f64), against **0.023 GIter/s** for
 vectorized NumPy float64. The nominal CPU→GPU ratio is ~51 000×, but NumPy has no
 early exit while the GPU rate charges iterations that never ran. Correcting for
@@ -310,7 +320,8 @@ cuda/julia.exe --bench --w 1920 --h 1080 --out artifacts/cuda_bench.csv
 # 3) CPU baseline (writes artifacts/cpu_bench.csv)
 uv run python scripts/reference_julia.py --bench
 
-# 4) Charts (writes docs/bench_giter.png, docs/bench_mpix.png)
+# 4) Charts (writes docs/bench_giter.png, docs/bench_mpix.png and their -dark twins).
+#    The charts above are drawn from the frozen data: --dir paper/data/benchmark
 uv run python scripts/benchmark.py
 ```
 
